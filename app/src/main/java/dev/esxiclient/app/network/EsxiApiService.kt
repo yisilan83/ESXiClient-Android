@@ -10,7 +10,7 @@ interface EsxiApiService {
     
     @Headers(
         "Content-Type: text/xml; charset=utf-8",
-        "SOAPAction: \"urn:vim25/6.7\""
+        "SOAPAction: \"urn:vim25/8.0\""
     )
     @POST("sdk")
     suspend fun soapRequest(
