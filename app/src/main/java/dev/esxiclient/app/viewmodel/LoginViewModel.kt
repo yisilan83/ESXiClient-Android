@@ -43,12 +43,13 @@ class LoginViewModel(application: Application) : AndroidViewModel(application) {
                 val response = RetrofitClient.service.executeSoap(host, soapBody)
                 
                 if (!response.isSuccessful) {
-                    val code = response.code
-                    _uiState.value = LoginUiState(error = "服务器响应异常: HTTP ${code}")
+                    val responseCode = response.code
+                    _uiState.value = LoginUiState(error = "服务器响应异常: HTTP ${responseCode}")
                     return@launch
                 }
 
-                val responseText = response.body?.string() ?: ""
+                val bodyString = response.body?.string()
+                val responseText = bodyString ?: ""
                 response.close()
 
                 if (responseText.isBlank()) {
