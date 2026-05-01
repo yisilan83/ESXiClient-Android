@@ -1,6 +1,7 @@
 package dev.esxiclient.app.viewmodel
 
 import android.app.Application
+import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import dev.esxiclient.app.data.local.SessionManager
@@ -41,22 +42,25 @@ class LoginViewModel(application: Application) : AndroidViewModel(application) {
 </soapenv:Envelope>"""
 
                 val response = RetrofitClient.service.executeSoap(host, soapBody)
-                
+                val httpCode = response.code
                 val bodyString = response.body?.string()
                 val responseText = bodyString ?: ""
                 response.close()
 
-                if (responseText.isBlank()) {
-                    _uiState.value = LoginUiState(error = "服务器返回空响应，请检查IP地址")
+                Log.d("ESXiClient", "HTTP $httpCode from $host/sdk")
+                Log.d("ESXiClient", "Response body: ${responseText.take(500)}")
+
+                if (responseText.isBlank() && !response.isSuccessful) {
+                    _uiState.value = LoginUiState(error = "服务器无响应 (HTTP " + httpCode + ")，请检查地址")
                     return@launch
                 }
 
-                if (!response.isSuccessful) {
-                    _uiState.value = LoginUiState(error = "服务器响应异常: HTTP " + response.code)
+                if (httpCode == 404) {
+                    _uiState.value = LoginUiState(error = "SOAP 端点不存在 (404)，请检查 ESXi 版本")
                     return@launch
                 }
 
-                if ("InvalidLogin" in responseText) {
+                if (httpCode == 500 && ("InvalidLogin" in responseText || "NoPermission" in responseText)) {
                     _uiState.value = LoginUiState(error = "用户名或密码错误")
                     return@launch
                 }
@@ -68,13 +72,15 @@ class LoginViewModel(application: Application) : AndroidViewModel(application) {
                         _uiState.value = LoginUiState(isSuccess = true)
                         return@launch
                     }
-                } else if ("soapenv:Fault" in responseText) {
+                }
+
+                if ("soapenv:Fault" in responseText) {
                     val faultMsg = responseText.substringAfter("<faultstring>").substringBefore("</faultstring>")
                     _uiState.value = LoginUiState(error = faultMsg.ifBlank { "SOAP 错误" })
                     return@launch
                 }
 
-                _uiState.value = LoginUiState(error = "未知的服务器响应格式")
+                _uiState.value = LoginUiState(error = "登录失败 (HTTP " + httpCode + ")，响应格式未知")
             } catch (e: java.net.UnknownHostException) {
                 _uiState.value = LoginUiState(error = "找不到主机，请检查 IP/域名")
             } catch (e: java.net.ConnectException) {
