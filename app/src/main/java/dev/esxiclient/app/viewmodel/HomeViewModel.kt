@@ -1,14 +1,17 @@
 package dev.esxiclient.app.viewmodel
 
-import androidx.lifecycle.ViewModel
+import android.app.Application
+import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import dev.esxiclient.app.data.local.SessionManager
 import dev.esxiclient.app.model.HostInfo
+import dev.esxiclient.app.model.PowerState
 import dev.esxiclient.app.model.VmInfo
-import dev.esxiclient.app.repository.EsxiRepository
-import dev.esxiclient.app.repository.MockEsxiRepository
+import dev.esxiclient.app.repository.RemoteEsxiRepository
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.launch
 
 data class HomeUiState(
@@ -18,10 +21,9 @@ data class HomeUiState(
     val error: String? = null
 )
 
-class HomeViewModel(
-    private val repository: EsxiRepository = MockEsxiRepository
-) : ViewModel() {
+class HomeViewModel(application: Application) : AndroidViewModel(application) {
 
+    private val sessionManager = SessionManager(application)
     private val _uiState = MutableStateFlow(HomeUiState())
     val uiState: StateFlow<HomeUiState> = _uiState.asStateFlow()
 
@@ -33,30 +35,43 @@ class HomeViewModel(
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(isLoading = true, error = null)
             try {
-                val host = repository.getHostInfo()
-                val vms = repository.getVmList()
+                val host = sessionManager.hostFlow.firstOrNull()
+                val sessionId = sessionManager.sessionIdFlow.firstOrNull()
+
+                if (host.isNullOrBlank() || sessionId.isNullOrBlank()) {
+                    _uiState.value = _uiState.value.copy(
+                        isLoading = false,
+                        error = "尚未登录或会话已过期"
+                    )
+                    return@launch
+                }
+
+                val repo = RemoteEsxiRepository(host, sessionId)
+                val hostInfo = repo.getHostInfo()
+                val vms = repo.getVmList()
+
+                val runningVms = vms.count { it.powerState == PowerState.POWERED_ON }
+                val updatedHostInfo = hostInfo.copy(
+                    runningVmCount = runningVms,
+                    totalVmCount = vms.size
+                )
+
                 _uiState.value = _uiState.value.copy(
                     isLoading = false,
-                    hostInfo = host,
+                    hostInfo = updatedHostInfo,
                     vmList = vms
                 )
             } catch (e: Exception) {
                 _uiState.value = _uiState.value.copy(
                     isLoading = false,
-                    error = e.message ?: "Failed to load data"
+                    error = "网络请求失败: ${e.message}"
                 )
             }
         }
     }
 
     fun togglePower(vmId: String) {
-        viewModelScope.launch {
-            val success = repository.toggleVmPower(vmId)
-            if (success) {
-                // Refresh list to get updated states
-                val newList = repository.getVmList()
-                _uiState.value = _uiState.value.copy(vmList = newList)
-            }
-        }
+        // 电源操作逻辑后续完善，目前仅支持刷新
+        loadData()
     }
 }
