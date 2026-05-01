@@ -6,6 +6,10 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import dev.esxiclient.app.data.local.SessionManager
 import dev.esxiclient.app.network.RetrofitClient
+import dev.esxiclient.app.network.dto.LoginRequest
+import dev.esxiclient.app.network.dto.MoRef
+import dev.esxiclient.app.network.dto.SoapBody
+import dev.esxiclient.app.network.dto.SoapEnvelope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
@@ -35,27 +39,33 @@ class LoginViewModel(application: Application) : AndroidViewModel(application) {
                 // 1. 初始化对应主机的 HTTP 客户端
                 val service = RetrofitClient.createService(host)
                 
-                // 2. 将用户名和密码拼接并进行 Base64 编码，生成 Basic Auth 字符串
-                val credentials = "$user:$pass"
-                val encodedCredentials = Base64.encodeToString(credentials.toByteArray(), Base64.NO_WRAP)
-                val basicAuthStr = "Basic $encodedCredentials"
+                // 2. 构建 SOAP 登录请求
+                val loginRequest = LoginRequest(
+                    _this = MoRef("SessionManager", "ha-sessionmgr"),
+                    userName = user,
+                    password = pass
+                )
+                val envelope = SoapEnvelope(body = SoapBody(login = loginRequest))
                 
-                // 3. 发送真实网络请求到 /api/session
-                val response = service.createSession(basicAuthStr)
+                // 3. 发送真实网络请求到 /sdk
+                val response = service.soapRequest(envelope)
 
                 if (response.isSuccessful) {
-                    // 4. 解析成功的响应 (ESXi 返回的 Session ID 通常带有双引号，如 "xxxxxxxx-xxxx-xxxx")
-                    val rawSession = response.body() ?: ""
-                    val sessionId = rawSession.replace("\"", "")
+                    // 4. 解析成功的响应
+                    val sessionKey = response.body()?.body?.loginResponse?.returnVal?.key
                     
-                    // 5. 将 Session ID 和 主机信息持久化保存
-                    sessionManager.saveSession(host, sessionId, user)
-                    
-                    // 6. 更新状态，通知 UI 跳转
-                    _uiState.value = LoginUiState(isSuccess = true)
+                    if (!sessionKey.isNullOrBlank()) {
+                        // 5. 将 Session ID 和 主机信息持久化保存
+                        sessionManager.saveSession(host, sessionKey, user)
+                        
+                        // 6. 更新状态，通知 UI 跳转
+                        _uiState.value = LoginUiState(isSuccess = true)
+                    } else {
+                        _uiState.value = LoginUiState(error = "登录失败: 无法获取 Session ID")
+                    }
                 } else {
-                    // 处理 HTTP 错误 (例如 401 Unauthorized 密码错误)
-                    val errorMsg = if (response.code() == 401) "用户名或密码错误" else "登录失败: ${response.code()}"
+                    // 处理 HTTP 错误 (例如 500 Internal Server Error 密码错误)
+                    val errorMsg = if (response.code() == 500) "用户名或密码错误" else "登录失败: ${response.code()}"
                     _uiState.value = LoginUiState(error = errorMsg)
                 }
             } catch (e: java.net.UnknownHostException) {
