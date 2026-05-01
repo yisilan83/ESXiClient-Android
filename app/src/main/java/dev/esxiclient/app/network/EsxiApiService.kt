@@ -1,5 +1,6 @@
 package dev.esxiclient.app.network
 
+import dev.esxiclient.app.network.dto.VmListResponse
 import retrofit2.Response
 import retrofit2.http.DELETE
 import retrofit2.http.GET
@@ -9,7 +10,6 @@ import retrofit2.http.POST
 interface EsxiApiService {
     
     // ==================== 认证 (Auth) ====================
-    // 使用 Basic Auth 获取 ESXi Session ID
     @POST("api/session")
     suspend fun createSession(
         @Header("Authorization") basicAuth: String
@@ -27,8 +27,9 @@ interface EsxiApiService {
     ): Response<Any>
 
     // ==================== 虚拟机 (Virtual Machines) ====================
+    // VMware vSphere 7/8 提供的基础虚拟机查询接口
     @GET("api/vcenter/vm")
     suspend fun getVmList(
         @Header("vmware-api-session-id") sessionId: String
-    ): Response<Any>
+    ): Response<VmListResponse>
 }
