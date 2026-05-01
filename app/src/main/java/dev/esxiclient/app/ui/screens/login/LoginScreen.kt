@@ -14,17 +14,34 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.viewmodel.compose.viewModel
 import dev.esxiclient.app.ui.components.AppLogo
+import dev.esxiclient.app.viewmodel.LoginViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun LoginScreen(onLoginSuccess: () -> Unit) {
+fun LoginScreen(
+    onLoginSuccess: () -> Unit,
+    viewModel: LoginViewModel = viewModel()
+) {
+    val uiState by viewModel.uiState.collectAsState()
+
     var host by remember { mutableStateOf("") }
     var username by remember { mutableStateOf("root") }
     var password by remember { mutableStateOf("") }
     var passwordVisible by remember { mutableStateOf(false) }
     var rememberMe by remember { mutableStateOf(false) }
-    var errorMessage by remember { mutableStateOf<String?>(null) }
+    
+    // 用于处理表单校验的错误信息
+    var localValidationError by remember { mutableStateOf<String?>(null) }
+
+    // 监听网络登录成功状态，成功时触发导航跳转
+    LaunchedEffect(uiState.isSuccess) {
+        if (uiState.isSuccess) {
+            viewModel.resetState()
+            onLoginSuccess()
+        }
+    }
 
     Scaffold { paddingValues ->
         Column(
@@ -37,7 +54,6 @@ fun LoginScreen(onLoginSuccess: () -> Unit) {
         ) {
             Spacer(modifier = Modifier.height(64.dp))
             
-            // 使用自定义绘制的专属 Logo 组件
             AppLogo(
                 modifier = Modifier.size(80.dp),
                 containerColor = MaterialTheme.colorScheme.primary,
@@ -53,30 +69,32 @@ fun LoginScreen(onLoginSuccess: () -> Unit) {
             
             OutlinedTextField(
                 value = host,
-                onValueChange = { host = it; errorMessage = null },
+                onValueChange = { host = it; localValidationError = null },
                 label = { Text("服务器地址") },
                 placeholder = { Text("IP或域名") },
                 leadingIcon = { Icon(Icons.Default.Language, null) },
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(12.dp)
+                shape = RoundedCornerShape(12.dp),
+                enabled = !uiState.isLoading
             )
             Spacer(modifier = Modifier.height(12.dp))
             
             OutlinedTextField(
                 value = username,
-                onValueChange = { username = it; errorMessage = null },
+                onValueChange = { username = it; localValidationError = null },
                 label = { Text("用户名") },
                 leadingIcon = { Icon(Icons.Default.Person, null) },
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(12.dp)
+                shape = RoundedCornerShape(12.dp),
+                enabled = !uiState.isLoading
             )
             Spacer(modifier = Modifier.height(12.dp))
             
             OutlinedTextField(
                 value = password,
-                onValueChange = { password = it; errorMessage = null },
+                onValueChange = { password = it; localValidationError = null },
                 label = { Text("密码") },
                 leadingIcon = { Icon(Icons.Default.Lock, null) },
                 trailingIcon = {
@@ -87,7 +105,8 @@ fun LoginScreen(onLoginSuccess: () -> Unit) {
                 visualTransformation = if (passwordVisible) VisualTransformation.None else PasswordVisualTransformation(),
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(12.dp)
+                shape = RoundedCornerShape(12.dp),
+                enabled = !uiState.isLoading
             )
             
             Spacer(modifier = Modifier.height(8.dp))
@@ -98,7 +117,8 @@ fun LoginScreen(onLoginSuccess: () -> Unit) {
             ) {
                 Checkbox(
                     checked = rememberMe,
-                    onCheckedChange = { rememberMe = it }
+                    onCheckedChange = { rememberMe = it },
+                    enabled = !uiState.isLoading
                 )
                 Text(text = "记住密码", style = MaterialTheme.typography.bodyMedium)
             }
@@ -107,16 +127,27 @@ fun LoginScreen(onLoginSuccess: () -> Unit) {
             
             Button(
                 onClick = {
-                    if (host.isNotBlank() && username.isNotBlank() && password.isNotBlank()) onLoginSuccess()
-                    else errorMessage = "请填写完整信息"
+                    localValidationError = null
+                    if (host.isBlank() || username.isBlank() || password.isBlank()) {
+                        localValidationError = "请填写完整的登录信息"
+                    } else {
+                        viewModel.login(host.trim(), username.trim(), password.trim(), rememberMe)
+                    }
                 },
                 modifier = Modifier.fillMaxWidth().height(52.dp),
-                shape = RoundedCornerShape(12.dp)
+                shape = RoundedCornerShape(12.dp),
+                enabled = !uiState.isLoading
             ) {
-                Text("登录", style = MaterialTheme.typography.labelLarge)
+                if (uiState.isLoading) {
+                    CircularProgressIndicator(modifier = Modifier.size(24.dp), color = MaterialTheme.colorScheme.onPrimary, strokeWidth = 2.dp)
+                } else {
+                    Text("登录", style = MaterialTheme.typography.labelLarge)
+                }
             }
             
-            errorMessage?.let { 
+            // 优先显示网络错误，其次是本地校验错误
+            val displayError = uiState.error ?: localValidationError
+            displayError?.let { 
                 Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 8.dp)) 
             }
             
