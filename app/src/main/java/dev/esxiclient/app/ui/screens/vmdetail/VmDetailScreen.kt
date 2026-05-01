@@ -30,7 +30,7 @@ fun VmDetailScreen(vmId: String, onBack: () -> Unit) {
     ) { paddingValues ->
         if (vm == null) return@Scaffold
         Column(modifier = Modifier.fillMaxSize().padding(paddingValues).verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-            FilledTonalCard(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp)) {
+            Card(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp)) {
                 Column(modifier = Modifier.fillMaxWidth().padding(20.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                     Icon(if (vm.powerState == PowerState.POWERED_ON) Icons.Default.PlayCircle else Icons.Default.StopCircle, null, modifier = Modifier.size(48.dp), tint = MaterialTheme.colorScheme.primary)
                     Spacer(modifier = Modifier.height(8.dp))
