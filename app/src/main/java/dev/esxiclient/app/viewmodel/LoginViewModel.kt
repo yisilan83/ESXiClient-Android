@@ -42,18 +42,17 @@ class LoginViewModel(application: Application) : AndroidViewModel(application) {
 
                 val response = RetrofitClient.service.executeSoap(host, soapBody)
                 
-                if (!response.isSuccessful) {
-                    val responseCode = response.code
-                    _uiState.value = LoginUiState(error = "服务器响应异常: HTTP ${responseCode}")
-                    return@launch
-                }
-
                 val bodyString = response.body?.string()
                 val responseText = bodyString ?: ""
                 response.close()
 
                 if (responseText.isBlank()) {
                     _uiState.value = LoginUiState(error = "服务器返回空响应，请检查IP地址")
+                    return@launch
+                }
+
+                if (!response.isSuccessful) {
+                    _uiState.value = LoginUiState(error = "服务器响应异常: HTTP " + response.code)
                     return@launch
                 }
 
@@ -81,9 +80,9 @@ class LoginViewModel(application: Application) : AndroidViewModel(application) {
             } catch (e: java.net.ConnectException) {
                 _uiState.value = LoginUiState(error = "连接被拒绝，请确保与 ESXi 同一网络")
             } catch (e: javax.net.ssl.SSLHandshakeException) {
-                _uiState.value = LoginUiState(error = "SSL 握手失败: ${e.message?.take(60)}")
+                _uiState.value = LoginUiState(error = "SSL 握手失败: " + (e.message?.take(60) ?: ""))
             } catch (e: Exception) {
-                _uiState.value = LoginUiState(error = "网络异常: ${e.javaClass.simpleName} - ${e.message}")
+                _uiState.value = LoginUiState(error = "网络异常: " + e.javaClass.simpleName + " - " + e.message)
             }
         }
     }
