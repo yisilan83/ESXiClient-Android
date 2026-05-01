@@ -6,7 +6,6 @@ on:
   workflow_dispatch:
 
 env:
-  # 强制 actions 跑在 Node.js 24 环境上以消除过时警告
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
@@ -33,8 +32,11 @@ jobs:
     - name: Build Debug APK
       run: ./gradlew assembleDebug
 
+    - name: Rename APK for clarity
+      run: mv app/build/outputs/apk/debug/app-debug.apk app/build/outputs/apk/debug/ESXiClient-v1.0.1-NewUI.apk
+
     - name: Upload APK Artifact
       uses: actions/upload-artifact@v4
       with:
-        name: ESXiClient-Debug-APK
-        path: app/build/outputs/apk/debug/app-debug.apk
+        name: ESXiClient-v1.0.1-NewUI
+        path: app/build/outputs/apk/debug/ESXiClient-v1.0.1-NewUI.apk
