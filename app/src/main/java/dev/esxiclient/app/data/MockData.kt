@@ -10,11 +10,11 @@ object MockData {
         cpuUsagePercent = 23,
         memoryUsagePercent = 45,
         totalMemoryGB = 32,
-        uptimeSeconds = 1324800,
+        uptimeSeconds = 1324800L,
         runningVmCount = 3,
         totalVmCount = 5,
-        storageUsedGB = 357,
-        storageTotalGB = 500
+        storageUsedGB = 357L,
+        storageTotalGB = 500L
     )
 
     val vmList = listOf(
@@ -24,14 +24,14 @@ object MockData {
             powerState = PowerState.POWERED_ON,
             cpuCount = 4,
             cpuUsagePercent = 35,
-            memoryMiB = 4096,
-            memoryUsedMiB = 2150,
+            memoryMiB = 4096L,
+            memoryUsedMiB = 2150L,
             guestOs = "Ubuntu Linux (64-bit)",
             ipAddress = "192.168.1.101",
-            uptimeSeconds = 1296000,
+            uptimeSeconds = 1296000L,
             disks = listOf(
-                DiskInfo("Hard disk 1", 100, 45),
-                DiskInfo("Hard disk 2", 50, 12)
+                DiskInfo("Hard disk 1", 100L, 45L),
+                DiskInfo("Hard disk 2", 50L, 12L)
             )
         ),
         VmInfo(
@@ -40,13 +40,13 @@ object MockData {
             powerState = PowerState.POWERED_OFF,
             cpuCount = 8,
             cpuUsagePercent = 0,
-            memoryMiB = 8192,
-            memoryUsedMiB = 0,
+            memoryMiB = 8192L,
+            memoryUsedMiB = 0L,
             guestOs = "Microsoft Windows Server 2019 (64-bit)",
             ipAddress = null,
-            uptimeSeconds = 0,
+            uptimeSeconds = 0L,
             disks = listOf(
-                DiskInfo("Hard disk 1", 200, 0)
+                DiskInfo("Hard disk 1", 200L, 0L)
             )
         ),
         VmInfo(
@@ -55,13 +55,13 @@ object MockData {
             powerState = PowerState.POWERED_ON,
             cpuCount = 2,
             cpuUsagePercent = 18,
-            memoryMiB = 2048,
-            memoryUsedMiB = 890,
+            memoryMiB = 2048L,
+            memoryUsedMiB = 890L,
             guestOs = "Debian Linux 12 (64-bit)",
             ipAddress = "192.168.1.102",
-            uptimeSeconds = 864000,
+            uptimeSeconds = 864000L,
             disks = listOf(
-                DiskInfo("Hard disk 1", 40, 15)
+                DiskInfo("Hard disk 1", 40L, 15L)
             )
         ),
         VmInfo(
@@ -70,13 +70,13 @@ object MockData {
             powerState = PowerState.SUSPENDED,
             cpuCount = 4,
             cpuUsagePercent = 0,
-            memoryMiB = 8192,
-            memoryUsedMiB = 0,
+            memoryMiB = 8192L,
+            memoryUsedMiB = 0L,
             guestOs = "Apple macOS 14 (64-bit)",
             ipAddress = null,
-            uptimeSeconds = 0,
+            uptimeSeconds = 0L,
             disks = listOf(
-                DiskInfo("Hard disk 1", 120, 68)
+                DiskInfo("Hard disk 1", 120L, 68L)
             )
         ),
         VmInfo(
@@ -85,14 +85,14 @@ object MockData {
             powerState = PowerState.POWERED_ON,
             cpuCount = 4,
             cpuUsagePercent = 62,
-            memoryMiB = 6144,
-            memoryUsedMiB = 4870,
+            memoryMiB = 6144L,
+            memoryUsedMiB = 4870L,
             guestOs = "CentOS Linux 7 (64-bit)",
             ipAddress = "192.168.1.103",
-            uptimeSeconds = 2592000,
+            uptimeSeconds = 2592000L,
             disks = listOf(
-                DiskInfo("Hard disk 1", 80, 52),
-                DiskInfo("Hard disk 2", 200, 145)
+                DiskInfo("Hard disk 1", 80L, 52L),
+                DiskInfo("Hard disk 2", 200L, 145L)
             )
         )
     )
