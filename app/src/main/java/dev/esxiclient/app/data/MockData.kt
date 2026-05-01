@@ -7,6 +7,7 @@ object MockData {
     val hostInfo = HostInfo(
         hostname = "esxi-homelab",
         hostAddress = "192.168.1.100",
+        version = "8.0.0",
         cpuUsagePercent = 23,
         memoryUsagePercent = 45,
         totalMemoryGB = 32,
