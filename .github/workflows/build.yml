@@ -3,7 +3,11 @@ name: Build Android APK
 on:
   push:
     branches: [ "main" ]
-  workflow_dispatch: # 允许在 GitHub 网页上通过按钮手动触发
+  workflow_dispatch:
+
+env:
+  # 强制 actions 跑在 Node.js 24 环境上以消除过时警告
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
   build:
