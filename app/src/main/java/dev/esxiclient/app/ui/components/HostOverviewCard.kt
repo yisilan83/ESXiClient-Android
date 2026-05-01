@@ -13,7 +13,7 @@ import dev.esxiclient.app.model.HostInfo
 
 @Composable
 fun HostOverviewCard(hostInfo: HostInfo, modifier: Modifier = Modifier) {
-    FilledTonalCard(modifier = modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp)) {
+    Card(modifier = modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp)) {
         Column(modifier = Modifier.fillMaxWidth().padding(16.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Icon(Icons.Default.Dns, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
