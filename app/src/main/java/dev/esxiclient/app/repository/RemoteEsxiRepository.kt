@@ -2,12 +2,14 @@ package dev.esxiclient.app.repository
 
 import dev.esxiclient.app.model.*
 import dev.esxiclient.app.network.RetrofitClient
+import dev.esxiclient.app.network.EsxiApiService
+import dev.esxiclient.app.network.dto.*
 
 class RemoteEsxiRepository(
     private val host: String,
     private val sessionId: String
 ) : EsxiRepository {
-    private val api = RetrofitClient.createService(host)
+    private val api: EsxiApiService = RetrofitClient.createService(host)
 
     override suspend fun getHostInfo(): HostInfo {
         var version = "Connected"
