@@ -6,7 +6,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
-import androidx.compose.runtime.Composable
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.pointer.pointerInput
@@ -18,6 +18,30 @@ import dev.esxiclient.app.model.HostInfo
 @Composable
 fun HostOverviewCard(hostInfo: HostInfo, modifier: Modifier = Modifier) {
     val context = LocalContext.current
+    var showSshDialog by remember { mutableStateOf(false) }
+
+    if (showSshDialog) {
+        AlertDialog(
+            onDismissRequest = { showSshDialog = false },
+            icon = { Icon(Icons.Default.Terminal, contentDescription = null, tint = MaterialTheme.colorScheme.primary) },
+            title = { Text("启用 SSH") },
+            text = { Text("是否要在主机 \"${hostInfo.hostname}\" 上启用 Secure Shell (SSH) 服务？") },
+            confirmButton = {
+                FilledTonalButton(onClick = {
+                    showSshDialog = false
+                    Toast.makeText(context, "Secure Shell (SSH) 已启用", Toast.LENGTH_SHORT).show()
+                }) {
+                    Text("启用")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showSshDialog = false }) {
+                    Text("取消")
+                }
+            }
+        )
+    }
+
     Card(modifier = modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp)) {
         Column(modifier = Modifier.fillMaxWidth().padding(16.dp)) {
             Row(
@@ -26,7 +50,7 @@ fun HostOverviewCard(hostInfo: HostInfo, modifier: Modifier = Modifier) {
                     .pointerInput(Unit) {
                         detectTapGestures(
                             onLongPress = {
-                                Toast.makeText(context, "Secure Shell (SSH) 已启用", Toast.LENGTH_SHORT).show()
+                                showSshDialog = true
                             }
                         )
                     },
