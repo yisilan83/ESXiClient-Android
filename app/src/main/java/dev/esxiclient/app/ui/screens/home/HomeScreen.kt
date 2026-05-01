@@ -23,14 +23,15 @@ import dev.esxiclient.app.viewmodel.HomeViewModel
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun HomeScreen(
-    onVmClick: (String) -> Unit, 
-    onSettingsClick: () -> Unit, 
+    onVmClick: (String) -> Unit,
+    onSettingsClick: () -> Unit,
     onLogout: () -> Unit,
     viewModel: HomeViewModel = viewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val scrollBehavior = TopAppBarDefaults.enterAlwaysScrollBehavior(rememberTopAppBarState())
     var confirmDialogVm by remember { mutableStateOf<VmInfo?>(null) }
+    var showLogoutDialog by remember { mutableStateOf(false) }
 
     confirmDialogVm?.let { vm ->
         AlertDialog(
@@ -54,11 +55,31 @@ fun HomeScreen(
         )
     }
 
+    if (showLogoutDialog) {
+        AlertDialog(
+            onDismissRequest = { showLogoutDialog = false },
+            icon = { Icon(Icons.Default.Logout, contentDescription = null) },
+            title = { Text("退出登录") },
+            text = { Text("确定要断开与当前服务器的连接吗？") },
+            confirmButton = {
+                FilledTonalButton(
+                    onClick = {
+                        showLogoutDialog = false
+                        onLogout()
+                    }
+                ) { Text("退出") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showLogoutDialog = false }) { Text("取消") }
+            }
+        )
+    }
+
     Scaffold(
         modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
         topBar = {
             LargeTopAppBar(
-                title = { 
+                title = {
                     Column {
                         Text("ESXi 客户端")
                         uiState.hostInfo?.let {
@@ -66,10 +87,10 @@ fun HomeScreen(
                         }
                     }
                 },
-                navigationIcon = { IconButton(onClick = onLogout) { Icon(Icons.Default.Logout, null) } },
-                actions = { 
+                navigationIcon = { IconButton(onClick = { showLogoutDialog = true }) { Icon(Icons.Default.Logout, null) } },
+                actions = {
                     IconButton(onClick = { viewModel.loadData() }) { Icon(Icons.Default.Refresh, null) }
-                    IconButton(onClick = onSettingsClick) { Icon(Icons.Default.Settings, null) } 
+                    IconButton(onClick = onSettingsClick) { Icon(Icons.Default.Settings, null) }
                 },
                 scrollBehavior = scrollBehavior
             )
@@ -79,13 +100,21 @@ fun HomeScreen(
             Box(modifier = Modifier.fillMaxSize().padding(paddingValues), contentAlignment = Alignment.Center) {
                 CircularProgressIndicator()
             }
+        } else if (uiState.error != null) {
+            Box(modifier = Modifier.fillMaxSize().padding(paddingValues), contentAlignment = Alignment.Center) {
+                EmptyState(
+                    icon = Icons.Default.ErrorOutline,
+                    title = "加载失败",
+                    description = uiState.error!!
+                )
+            }
         } else {
             LazyColumn(modifier = Modifier.fillMaxSize().padding(paddingValues), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 uiState.hostInfo?.let { host ->
                     item { HostOverviewCard(hostInfo = host) }
                 }
-                
-                item { 
+
+                item {
                     Row(modifier = Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                         Text(text = "虚拟机 (${uiState.vmList.size})", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                         TextButton(onClick = { /* 模拟排序 */ }) {
@@ -95,13 +124,13 @@ fun HomeScreen(
                         }
                     }
                 }
-                
+
                 if (uiState.vmList.isEmpty()) {
                     item {
                         EmptyState(
                             icon = Icons.Default.CloudOff,
                             title = "暂无虚拟机",
-                            description = "当前主机上没有发现任何虚拟机",
+                            description = "未拉取到虚拟机列表数据",
                             modifier = Modifier.fillMaxWidth().padding(vertical = 48.dp)
                         )
                     }
