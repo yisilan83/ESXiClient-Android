@@ -1,9 +1,9 @@
 package dev.esxiclient.app.network
 
+import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
-import okhttp3.logging.HttpLoggingInterceptor
-import retrofit2.Retrofit
-import retrofit2.converter.simplexml.SimpleXmlConverterFactory
+import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
 import java.security.SecureRandom
 import java.security.cert.X509Certificate
 import javax.net.ssl.SSLContext
@@ -22,25 +22,24 @@ object RetrofitClient {
         init(null, trustAllCerts, SecureRandom())
     }
 
-    private val loggingInterceptor = HttpLoggingInterceptor().apply {
-        level = HttpLoggingInterceptor.Level.BODY
-    }
-
-    private val okHttpClient = OkHttpClient.Builder()
+    private val client = OkHttpClient.Builder()
         .sslSocketFactory(sslContext.socketFactory, trustAllCerts[0] as X509TrustManager)
         .hostnameVerifier { _, _ -> true }
-        .addInterceptor(loggingInterceptor)
         .build()
 
-    fun createService(baseUrl: String): EsxiApiService {
-        val formattedUrl = if (!baseUrl.startsWith("http")) "https://$baseUrl" else baseUrl
-        val urlWithSlash = if (!formattedUrl.endsWith("/")) "$formattedUrl/" else formattedUrl
+    val service: EsxiApiService = object : EsxiApiService {
+        override suspend fun executeSoap(url: String, soapXml: String): okhttp3.Response {
+            val formattedUrl = if (!url.startsWith("https://")) "https://$url" else url
+            val fullUrl = "$formattedUrl/sdk"
 
-        return Retrofit.Builder()
-            .baseUrl(urlWithSlash)
-            .client(okHttpClient)
-            .addConverterFactory(SimpleXmlConverterFactory.createNonStrict())
-            .build()
-            .create(EsxiApiService::class.java)
+            val request = Request.Builder()
+                .url(fullUrl)
+                .post(soapXml.toRequestBody("text/xml".toMediaType()))
+                .header("Content-Type", "text/xml; charset=utf-8")
+                .header("SOAPAction", "\"urn:vim25/8.0\"")
+                .build()
+
+            return client.newCall(request).execute()
+        }
     }
 }
