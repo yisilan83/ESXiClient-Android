@@ -6,9 +6,11 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import dev.esxiclient.app.data.local.SessionManager
 import dev.esxiclient.app.network.RetrofitClient
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 data class LoginUiState(
     val isLoading: Boolean = false,
@@ -27,10 +29,11 @@ class LoginViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             _uiState.value = LoginUiState(isLoading = true)
             try {
-                val escapedUser = user.replace("&", "&amp;").replace("<", "&lt;")
-                val escapedPass = pass.replace("&", "&amp;").replace("<", "&lt;")
+                val result = withContext(Dispatchers.IO) {
+                    val escapedUser = user.replace("&", "&amp;").replace("<", "&lt;")
+                    val escapedPass = pass.replace("&", "&amp;").replace("<", "&lt;")
 
-                val soapBody = """<?xml version="1.0" encoding="UTF-8"?>
+                    val soapBody = """<?xml version="1.0" encoding="UTF-8"?>
 <soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:vim="urn:vim25">
   <soapenv:Body>
     <vim:Login>
@@ -41,16 +44,22 @@ class LoginViewModel(application: Application) : AndroidViewModel(application) {
   </soapenv:Body>
 </soapenv:Envelope>"""
 
-                val response = RetrofitClient.service.executeSoap(host, soapBody)
-                val httpCode = response.code
-                val bodyString = response.body?.string()
-                val responseText = bodyString ?: ""
-                response.close()
+                    val response = RetrofitClient.service.executeSoap(host, soapBody)
+                    val httpCode = response.code
+                    val bodyString = response.body?.string()
+                    val responseText = bodyString ?: ""
+                    response.close()
 
-                Log.d("ESXiClient", "HTTP $httpCode from $host/sdk")
-                Log.d("ESXiClient", "Response body: ${responseText.take(500)}")
+                    Log.d("ESXiClient", "HTTP $httpCode from $host/sdk")
+                    Log.d("ESXiClient", "Response body: ${responseText.take(500)}")
 
-                if (responseText.isBlank() && !response.isSuccessful) {
+                    Pair(httpCode, responseText)
+                }
+
+                val httpCode = result.first
+                val responseText = result.second
+
+                if (responseText.isBlank() && httpCode >= 400) {
                     _uiState.value = LoginUiState(error = "服务器无响应 (HTTP " + httpCode + ")，请检查地址")
                     return@launch
                 }
