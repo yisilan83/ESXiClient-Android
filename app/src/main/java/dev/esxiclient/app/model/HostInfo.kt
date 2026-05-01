@@ -3,6 +3,7 @@ package dev.esxiclient.app.model
 data class HostInfo(
     val hostname: String,
     val hostAddress: String,
+    val version: String,
     val cpuUsagePercent: Int,
     val memoryUsagePercent: Int,
     val totalMemoryGB: Int,
