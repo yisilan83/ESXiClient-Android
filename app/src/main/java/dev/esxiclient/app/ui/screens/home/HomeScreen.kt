@@ -12,18 +12,23 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import dev.esxiclient.app.data.MockData
+import androidx.lifecycle.viewmodel.compose.viewModel
 import dev.esxiclient.app.model.PowerState
 import dev.esxiclient.app.model.VmInfo
 import dev.esxiclient.app.ui.components.EmptyState
 import dev.esxiclient.app.ui.components.HostOverviewCard
 import dev.esxiclient.app.ui.components.VmCard
+import dev.esxiclient.app.viewmodel.HomeViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun HomeScreen(onVmClick: (String) -> Unit, onSettingsClick: () -> Unit, onLogout: () -> Unit) {
-    val hostInfo = MockData.hostInfo
-    val vmList = remember { mutableStateListOf<VmInfo>().apply { addAll(MockData.vmList) } }
+fun HomeScreen(
+    onVmClick: (String) -> Unit, 
+    onSettingsClick: () -> Unit, 
+    onLogout: () -> Unit,
+    viewModel: HomeViewModel = viewModel()
+) {
+    val uiState by viewModel.uiState.collectAsState()
     val scrollBehavior = TopAppBarDefaults.enterAlwaysScrollBehavior(rememberTopAppBarState())
     var confirmDialogVm by remember { mutableStateOf<VmInfo?>(null) }
 
@@ -36,10 +41,7 @@ fun HomeScreen(onVmClick: (String) -> Unit, onSettingsClick: () -> Unit, onLogou
             confirmButton = {
                 FilledTonalButton(
                     onClick = {
-                        val index = vmList.indexOfFirst { it.id == vm.id }
-                        if (index >= 0) {
-                            vmList[index] = vm.copy(powerState = if (vm.powerState == PowerState.POWERED_ON) PowerState.POWERED_OFF else PowerState.POWERED_ON)
-                        }
+                        viewModel.togglePower(vm.id)
                         confirmDialogVm = null
                     },
                     colors = ButtonDefaults.filledTonalButtonColors(
@@ -59,41 +61,54 @@ fun HomeScreen(onVmClick: (String) -> Unit, onSettingsClick: () -> Unit, onLogou
                 title = { 
                     Column {
                         Text("ESXi 客户端")
-                        Text(hostInfo.hostAddress, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        uiState.hostInfo?.let {
+                            Text(it.hostAddress, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
                     }
                 },
                 navigationIcon = { IconButton(onClick = onLogout) { Icon(Icons.Default.Logout, null) } },
-                actions = { IconButton(onClick = onSettingsClick) { Icon(Icons.Default.Settings, null) } },
+                actions = { 
+                    IconButton(onClick = { viewModel.loadData() }) { Icon(Icons.Default.Refresh, null) }
+                    IconButton(onClick = onSettingsClick) { Icon(Icons.Default.Settings, null) } 
+                },
                 scrollBehavior = scrollBehavior
             )
         }
     ) { paddingValues ->
-        LazyColumn(modifier = Modifier.fillMaxSize().padding(paddingValues), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            item { HostOverviewCard(hostInfo = hostInfo) }
-            
-            item { 
-                Row(modifier = Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                    Text(text = "虚拟机 (${vmList.size})", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                    TextButton(onClick = { /* 模拟排序 */ }) {
-                        Icon(Icons.Default.Sort, contentDescription = null, modifier = Modifier.size(18.dp))
-                        Spacer(Modifier.width(4.dp))
-                        Text("排序")
+        if (uiState.isLoading) {
+            Box(modifier = Modifier.fillMaxSize().padding(paddingValues), contentAlignment = Alignment.Center) {
+                CircularProgressIndicator()
+            }
+        } else {
+            LazyColumn(modifier = Modifier.fillMaxSize().padding(paddingValues), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                uiState.hostInfo?.let { host ->
+                    item { HostOverviewCard(hostInfo = host) }
+                }
+                
+                item { 
+                    Row(modifier = Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                        Text(text = "虚拟机 (${uiState.vmList.size})", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                        TextButton(onClick = { /* 模拟排序 */ }) {
+                            Icon(Icons.Default.Sort, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(Modifier.width(4.dp))
+                            Text("排序")
+                        }
                     }
                 }
-            }
-            
-            if (vmList.isEmpty()) {
-                item {
-                    EmptyState(
-                        icon = Icons.Default.CloudOff,
-                        title = "暂无虚拟机",
-                        description = "当前主机上没有发现任何虚拟机",
-                        modifier = Modifier.fillMaxWidth().padding(vertical = 48.dp)
-                    )
-                }
-            } else {
-                items(items = vmList, key = { it.id }) { vm ->
-                    VmCard(vm = vm, onPowerToggle = { confirmDialogVm = vm }, onClick = { onVmClick(vm.id) })
+                
+                if (uiState.vmList.isEmpty()) {
+                    item {
+                        EmptyState(
+                            icon = Icons.Default.CloudOff,
+                            title = "暂无虚拟机",
+                            description = "当前主机上没有发现任何虚拟机",
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 48.dp)
+                        )
+                    }
+                } else {
+                    items(items = uiState.vmList, key = { it.id }) { vm ->
+                        VmCard(vm = vm, onPowerToggle = { confirmDialogVm = vm }, onClick = { onVmClick(vm.id) })
+                    }
                 }
             }
         }
