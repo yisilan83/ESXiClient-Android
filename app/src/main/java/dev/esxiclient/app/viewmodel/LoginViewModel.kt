@@ -1,7 +1,6 @@
 package dev.esxiclient.app.viewmodel
 
 import android.app.Application
-import android.util.Base64
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import dev.esxiclient.app.data.local.SessionManager
@@ -44,7 +43,8 @@ class LoginViewModel(application: Application) : AndroidViewModel(application) {
                 val response = RetrofitClient.service.executeSoap(host, soapBody)
                 
                 if (!response.isSuccessful) {
-                    _uiState.value = LoginUiState(error = "服务器响应异常: HTTP ${response.code()}")
+                    val code = response.code
+                    _uiState.value = LoginUiState(error = "服务器响应异常: HTTP ${code}")
                     return@launch
                 }
 
