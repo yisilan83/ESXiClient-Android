@@ -17,7 +17,7 @@ class RemoteEsxiRepository(
     }
 
     override suspend fun getHostInfo(): HostInfo {
-        var version = "Unknown"
+        var fullVersion = "Unknown"
         try {
             val soap = """<?xml version="1.0" encoding="UTF-8"?>
 <soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:vim="urn:vim25">
@@ -29,14 +29,17 @@ class RemoteEsxiRepository(
 </soapenv:Envelope>"""
             val responseText = callSoap(soap)
             if ("<fullName>" in responseText) {
-                version = responseText.substringAfter("<fullName>").substringBefore("</fullName>")
+                fullVersion = responseText.substringAfter("<fullName>").substringBefore("</fullName>")
             }
         } catch (_: Exception) {}
+
+        // 正则化版本号：从 "VMware ESXi 8.0.0 build-21203435" 提取为 "8.0.0"
+        val shortVersion = normalizeVersion(fullVersion)
 
         return HostInfo(
             hostname = host,
             hostAddress = host,
-            version = version,
+            version = shortVersion,
             cpuUsagePercent = 0,
             memoryUsagePercent = 0,
             totalMemoryGB = 0,
@@ -46,6 +49,11 @@ class RemoteEsxiRepository(
             storageUsedGB = 0,
             storageTotalGB = 0
         )
+    }
+
+    private fun normalizeVersion(raw: String): String {
+        val regex = Regex("""(\d+\.\d+(?:\.\d+)?)""")
+        return regex.find(raw)?.value ?: raw
     }
 
     override suspend fun getVmList(): List<VmInfo> {
