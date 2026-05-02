@@ -8,4 +8,9 @@ interface EsxiRepository {
     suspend fun getVmList(): List<VmInfo>
     suspend fun getVmById(vmId: String): VmInfo?
     suspend fun toggleVmPower(vmId: String): Boolean
+
+    /** Priority used by the protocol negotiator: higher = better. */
+    val priority: Int
+    /** Human-readable protocol name for debugging. */
+    val protocolName: String
 }
