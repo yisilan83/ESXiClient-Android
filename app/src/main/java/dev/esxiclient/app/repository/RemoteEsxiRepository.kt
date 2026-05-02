@@ -9,14 +9,14 @@ class RemoteEsxiRepository(
     private val sessionId: String
 ) : EsxiRepository {
 
-    // ==================== 核心 SOAP 调用 ====================
+    // ==================== 核心 SOAP 调用（携带 sessionId） ====================
 
     private suspend fun callSoap(soapXml: String): String {
-        Log.d("ESXiRepo", "→ SOAP 请求: ${soapXml.take(300)}")
-        val response = RetrofitClient.service.executeSoap(host, soapXml)
+        Log.d("ESXiRepo", "→ SOAP 请求: ${soapXml.take(200)}")
+        val response = RetrofitClient.service.executeSoap(host, soapXml, sessionId)
         val body = response.body?.string() ?: ""
         response.close()
-        Log.d("ESXiRepo", "← SOAP 响应 (${body.length} 字符): ${body.take(500)}")
+        Log.d("ESXiRepo", "← SOAP 响应 (${body.length} 字符): ${body.take(400)}")
         return body
     }
 
@@ -35,7 +35,7 @@ class RemoteEsxiRepository(
             Log.d("ESXiRepo", "pcMoid=$_propertyCollectorMoid  rootFolder=$rootFolder")
 
             if (_propertyCollectorMoid.isNullOrBlank() || rootFolder.isBlank()) {
-                Log.e("ESXiRepo", "无法解析 ServiceContent 中的关键引用")
+                Log.e("ESXiRepo", "无法解析 ServiceContent 关键引用")
                 return false
             }
 
@@ -49,16 +49,13 @@ class RemoteEsxiRepository(
     }
 
     private fun extractMoRefVal(xml: String, typeName: String): String {
-        // 从 SOAP 响应提取 <typeName type="Xxx">value</typeName>
         val regex = Regex("""<$typeName type="\w+">([^<]+)</$typeName>""")
         val m = regex.find(xml) ?: Regex("""<$typeName[^>]*>([^<]+)</$typeName>""").find(xml)
         return m?.groupValues?.get(1) ?: ""
     }
 
-    private fun extractAllMoidsFromXml(xml: String): List<String> {
-        // 提取所有 <value>xxx-nnn</value> 的 MOID
-        val regex = Regex("""<value>(\w+-\d+)</value>""")
-        return regex.findAll(xml).map { it.groupValues[1] }.toList().distinct()
+    private fun extractAllMoids(xml: String): List<String> {
+        return Regex("""<value>(\w+-\d+)</value>""").findAll(xml).map { it.groupValues[1] }.toList().distinct()
     }
 
     private suspend fun traverseToFindHostSystems(folderMoid: String): List<String> {
@@ -70,7 +67,8 @@ class RemoteEsxiRepository(
             val currentMoid = queue.removeFirst()
             try {
                 val childXml = callSoap(BUILDER.folderChildEntity(_propertyCollectorMoid!!, currentMoid))
-                val allMoids = extractAllMoidsFromXml(childXml)
+                val allMoids = extractAllMoids(childXml)
+                Log.d("ESXiRepo", "  folder $currentMoid → childEntities: $allMoids")
                 for (moid in allMoids) {
                     when {
                         moid.startsWith("host-") -> hosts.add(moid)
@@ -92,7 +90,7 @@ class RemoteEsxiRepository(
         if (!initServiceContent()) return buildHostInfo("Unknown")
 
         val hostMoid = _hostSystems.first()
-        Log.d("ESXiRepo", "HostSystem: $hostMoid")
+        Log.d("ESXiRepo", "查询 HostSystem: $hostMoid")
 
         try {
             val propsXml = callSoap(BUILDER.hostProperties(_propertyCollectorMoid!!, hostMoid))
@@ -112,19 +110,22 @@ class RemoteEsxiRepository(
             val memUsage  = if (totalMemGb > 0) ((memMbRaw * 100L) / (totalMemGb * 1024)).toInt() else 0
 
             val uptime    = extractProp(propsXml, "uptime").filter { it.isDigit() }.toLongOrNull() ?: 0L
-            val totalVMs  = extractProp(propsXml, "totalVmCount").filter { it.isDigit() }.toIntOrNull()
-                ?: extractAllMoidsFromXml(extractProp(propsXml, "vm")).size
+            val vmMoids   = extractAllMoids(extractProp(propsXml, "vm")).filter { it.startsWith("vm-") }
+            val totalVMs  = vmMoids.size.coerceAtLeast(
+                extractProp(propsXml, "totalVmCount").filter { it.isDigit() }.toIntOrNull() ?: 0
+            )
 
+            // 存储
             var storageUsed = 0L
             var storageTotal = 0L
             val dsXml = extractProp(propsXml, "datastore")
-            val dsMoids = extractAllMoidsFromXml(dsXml).filter { it.startsWith("datastore-") }
-            Log.d("ESXiRepo", "Datastore MOIDs: $dsMoids")
+            val dsMoids = extractAllMoids(dsXml).filter { it.startsWith("datastore-") }
+            Log.d("ESXiRepo", "datastore MOIDs: $dsMoids")
             for (dsMoid in dsMoids.take(10)) {
                 try {
-                    val dsXmlR = callSoap(BUILDER.datastoreProperties(_propertyCollectorMoid!!, dsMoid))
-                    val cap  = extractProp(dsXmlR, "capacity").filter { it.isDigit() }.toLongOrNull() ?: 0L
-                    val free = extractProp(dsXmlR, "freeSpace").filter { it.isDigit() }.toLongOrNull() ?: 0L
+                    val dsR = callSoap(BUILDER.datastoreProperties(_propertyCollectorMoid!!, dsMoid))
+                    val cap  = extractProp(dsR, "capacity").filter { it.isDigit() }.toLongOrNull() ?: 0L
+                    val free = extractProp(dsR, "freeSpace").filter { it.isDigit() }.toLongOrNull() ?: 0L
                     storageTotal += cap / (1024*1024*1024)
                     storageUsed  += (cap - free) / (1024*1024*1024)
                 } catch (_: Exception) {}
@@ -138,7 +139,7 @@ class RemoteEsxiRepository(
         }
     }
 
-    // ==================== 虚拟机列表 ====================
+    // ==================== VM 列表 ====================
 
     override suspend fun getVmList(): List<VmInfo> {
         Log.d("ESXiRepo", "===== getVmList =====")
@@ -147,14 +148,14 @@ class RemoteEsxiRepository(
 
         try {
             val hostVmXml = callSoap(BUILDER.hostVmList(_propertyCollectorMoid!!, _hostSystems.first()))
-            val vmMoids = extractAllMoidsFromXml(hostVmXml).filter { it.startsWith("vm-") }
+            val vmMoids = extractAllMoids(hostVmXml).filter { it.startsWith("vm-") }
             Log.d("ESXiRepo", "发现 ${vmMoids.size} 个 VM")
 
             for (vmMoid in vmMoids.take(30)) {
                 try {
                     val vmXml = callSoap(BUILDER.vmProperties(_propertyCollectorMoid!!, vmMoid))
-                    val name = extractProp(vmXml, "name").ifBlank { vmMoid }
-                    val ps = extractProp(vmXml, "powerState")
+                    val name  = extractProp(vmXml, "name").ifBlank { vmMoid }
+                    val ps    = extractProp(vmXml, "powerState")
                     val powerState = when (ps) {
                         "poweredOn" -> PowerState.POWERED_ON
                         "suspended" -> PowerState.SUSPENDED
@@ -186,18 +187,16 @@ class RemoteEsxiRepository(
     override suspend fun getVmById(vmId: String): VmInfo? = getVmList().find { it.id == vmId }
     override suspend fun toggleVmPower(vmId: String): Boolean = false
 
-    // ==================== XML 解析辅助 ====================
+    // ==================== XML 解析 ====================
 
     private fun extractTag(xml: String, tag: String): String {
-        // 匹配 <tag>value</tag> 或 <vim:tag>value</vim:tag> 或 <ns0:tag>value</ns0:tag>
         for (prefix in listOf("", "vim:", "ns0:")) {
-            val result = xml.substringAfter("<${prefix}$tag>").substringBefore("</${prefix}$tag>")
-            if (result != xml) return result
+            val v = xml.substringAfter("<${prefix}$tag>").substringBefore("</${prefix}$tag>")
+            if (v != xml) return v
         }
         return ""
     }
 
-    /** 从 RetrievePropertiesEx 响应中提取属性名对应的 val */
     private fun extractProp(xml: String, name: String): String {
         val regex = Regex("""<name>$name</name>\s*<val[^>]*>(.*?)</val>""", RegexOption.DOT_MATCHES_ALL)
         return regex.find(xml)?.groupValues?.get(1)?.trim() ?: ""
