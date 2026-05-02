@@ -35,14 +35,17 @@ object RetrofitClient {
         .build()
 
     val service: EsxiApiService = object : EsxiApiService {
-        override suspend fun executeSoap(url: String, soapXml: String): okhttp3.Response {
+        override suspend fun executeSoap(url: String, soapXml: String, sessionId: String?): okhttp3.Response {
             val finalUrl = if (url.startsWith("https://")) "$url/sdk" else "https://$url/sdk"
-            val request = Request.Builder()
+            val builder = Request.Builder()
                 .url(finalUrl)
                 .post(soapXml.toRequestBody("text/xml".toMediaType()))
                 .header("Content-Type", "text/xml; charset=utf-8")
                 .header("SOAPAction", "\"urn:vim25/8.0\"")
-                .build()
+            if (!sessionId.isNullOrBlank()) {
+                builder.header("Cookie", "vmware_soap_session=$sessionId")
+            }
+            val request = builder.build()
 
             return suspendCancellableCoroutine { continuation ->
                 val call = client.newCall(request)
