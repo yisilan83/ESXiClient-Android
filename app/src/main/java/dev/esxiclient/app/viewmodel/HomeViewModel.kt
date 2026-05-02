@@ -8,7 +8,7 @@ import dev.esxiclient.app.data.local.SessionManager
 import dev.esxiclient.app.model.HostInfo
 import dev.esxiclient.app.model.PowerState
 import dev.esxiclient.app.model.VmInfo
-import dev.esxiclient.app.repository.RemoteEsxiRepository
+import dev.esxiclient.app.repository.EsxiConnector
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -21,7 +21,9 @@ data class HomeUiState(
     val isLoading: Boolean = true,
     val hostInfo: HostInfo? = null,
     val vmList: List<VmInfo> = emptyList(),
-    val error: String? = null
+    val error: String? = null,
+    /** Display the protocol used to fetch data (REST or SOAP). */
+    val protocol: String = ""
 )
 
 class HomeViewModel(application: Application) : AndroidViewModel(application) {
@@ -41,11 +43,12 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
             try {
                 val host = sessionManager.hostFlow.firstOrNull()
                 val sessionId = sessionManager.sessionIdFlow.firstOrNull()
+                val username = sessionManager.usernameFlow.firstOrNull() ?: "root"
+                val password = sessionManager.passwordFlow.firstOrNull() ?: ""
 
-                Log.d("HomeVM", "读取 session: host=$host, sessionId=${sessionId?.take(10)}...")
+                Log.d("HomeVM", "读取 session: host=$host, user=$username, sessionId=${sessionId?.take(10)}...")
 
-                if (host.isNullOrBlank() || sessionId.isNullOrBlank()) {
-                    Log.w("HomeVM", "session 为空，跳转到未登录状态")
+                if (host.isNullOrBlank()) {
                     _uiState.value = _uiState.value.copy(
                         isLoading = false,
                         error = "尚未登录或会话已过期"
@@ -53,21 +56,22 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                     return@launch
                 }
 
-                Log.d("HomeVM", "开始 withContext(IO)...")
+                Log.d("HomeVM", "开始协议协商...")
                 val result = withContext(Dispatchers.IO) {
-                    val repo = RemoteEsxiRepository(host, sessionId)
-                    Log.d("HomeVM", "RemoteEsxiRepository 已创建，开始获取主机信息...")
+                    val connector = EsxiConnector(host)
+                    val conn = connector.connect(username, password, sessionId ?: "")
+                    Log.d("HomeVM", "已选择协议: ${conn.usedProtocol}")
+                    val repo = conn.repository
                     val hostInfo = repo.getHostInfo()
-                    Log.d("HomeVM", "主机信息: cpu=${hostInfo.cpuUsagePercent}% mem=${hostInfo.memoryUsagePercent}% vm=${hostInfo.totalVmCount}")
-                    Log.d("HomeVM", "开始获取 VM 列表...")
+                    Log.d("HomeVM", "主机信息: cpu=${hostInfo.cpuUsagePercent}% mem=${hostInfo.memoryUsagePercent}%")
                     val vms = repo.getVmList()
                     Log.d("HomeVM", "VM 列表: ${vms.size} 个")
-                    Pair(hostInfo, vms)
+                    Triple(hostInfo, vms, conn.usedProtocol)
                 }
-                Log.d("HomeVM", "withContext 完成")
 
                 val hostInfo = result.first
                 val vms = result.second
+                val protocol = result.third
 
                 val runningVms = vms.count { it.powerState == PowerState.POWERED_ON }
                 val updatedHostInfo = hostInfo.copy(
@@ -78,10 +82,11 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                 _uiState.value = _uiState.value.copy(
                     isLoading = false,
                     hostInfo = updatedHostInfo,
-                    vmList = vms
+                    vmList = vms,
+                    protocol = protocol
                 )
-                Log.d("HomeVM", "UI 状态已更新")
-            } catch (e: java.util.concurrent.CancellationException) {
+                Log.d("HomeVM", "UI 状态已更新 (协议: $protocol)")
+            } catch (e: kotlinx.coroutines.CancellationException) {
                 throw e
             } catch (e: Exception) {
                 Log.e("HomeVM", "加载失败: ${e.javaClass.simpleName} - ${e.message}", e)
