@@ -20,8 +20,8 @@ data class LoginUiState(
     val savedHost: String = "",
     val savedUser: String = "",
     val savedPass: String = "",
-    val savedRememberMe: Boolean = false,      // ← current
-    val savedCheckHttp: Boolean = false        // ← new
+    val savedRememberMe: Boolean = false,
+    val savedCheckHttp: Boolean = false
 )
 
 class LoginViewModel(application: Application) : AndroidViewModel(application) {
@@ -100,6 +100,7 @@ class LoginViewModel(application: Application) : AndroidViewModel(application) {
                 if ("<key>" in responseText) {
                     val sessionId = responseText.substringAfter("<key>").substringBefore("</key>")
                     if (sessionId.isNotBlank()) {
+                        // Always save password so HomeViewModel can use it for REST Basic Auth
                         sessionManager.saveSession(host, sessionId, user, pass, rememberMe, checkHttp)
                         _uiState.value = _uiState.value.copy(isLoading = false, isSuccess = true)
                         return@launch
