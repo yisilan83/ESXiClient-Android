@@ -21,42 +21,15 @@ class RemoteEsxiRepository(
     }
 
     private var pcMoid = ""
-    private var hostSystems: List<String> = emptyList()
 
     private suspend fun init(): Boolean {
-        if (pcMoid.isNotBlank() && hostSystems.isNotEmpty()) return true
+        if (pcMoid.isNotBlank()) return true
         try {
             val sc = callSoap(B.serviceContent(), "SC")
             pcMoid = rx1("propertyCollector", sc)
-            val rf = rx1("rootFolder", sc)
             apiVersion = rx1("apiVersion", sc).ifBlank { "8.0" }
-            Log.d("R","pc=$pcMoid rf=$rf apiVer=$apiVersion")
-            if (pcMoid.isBlank() || rf.isBlank()) return false
-
-            // 先用 SearchIndex
-            val si = rx1("searchIndex", sc)
-            if (si.isNotBlank()) {
-                // FindByDnsName
-                val dns = host.replace("https://","").replace(":8443","").split("/")[0]
-                val xml = callSoap(B.findByDnsName(si, dns, false), "DNS")
-                val hs = Regex("""<HostSystem type="\w+">(\w+-\d+)</HostSystem>""").findAll(xml).map { it.groupValues[1] }.toList()
-                Log.d("R","FindByDnsName: $hs")
-                if (hs.isNotEmpty()) { hostSystems = hs; return true }
-
-                // FindByIp
-                val ip = try { java.net.InetAddress.getByName(dns).hostAddress } catch (_:Exception) { "" }
-                if (ip.isNotBlank()) {
-                    val xml2 = callSoap(B.findByIp(si, ip, false), "IP")
-                    val hs2 = Regex("""<HostSystem type="\w+">(\w+-\d+)</HostSystem>""").findAll(xml2).map { it.groupValues[1] }.toList()
-                    Log.d("R","FindByIp: $hs2")
-                    if (hs2.isNotEmpty()) { hostSystems = hs2; return true }
-                }
-            }
-
-            // 回退：Folder 遍历（现在带 vmware_client Cookie + 正确 SOAPAction）
-            hostSystems = findHosts(rf)
-            Log.d("R","Folder遍历: $hostSystems")
-            return hostSystems.isNotEmpty()
+            Log.d("R","pc=$pcMoid apiVer=$apiVersion")
+            return pcMoid.isNotBlank()
         } catch (e: Exception) { Log.e("R","init err ${e.message}",e); return false }
     }
 
@@ -67,34 +40,17 @@ class RemoteEsxiRepository(
     }
 
     private fun moids(xml: String) = Regex("""<value>(\w+-\d+)</value>""").findAll(xml).map { it.groupValues[1] }.toMutableList()
-    private fun morefs(xml: String) = Regex("""<ManagedObjectReference type="\w+">(\w+-\d+)</ManagedObjectReference>""").findAll(xml).map { it.groupValues[1] }.toList()
-
-    private suspend fun findHosts(fid: String): List<String> {
-        val hosts = mutableListOf<String>()
-        val q = ArrayDeque(listOf(fid))
-        val seen = mutableSetOf<String>()
-        while (q.isNotEmpty()) {
-            val cur = q.removeFirst()
-            if (cur in seen) continue
-            seen.add(cur)
-            val xml = callSoap(B.folderChildren(pcMoid, cur), "F$cur")
-            val kids = (moids(xml) + morefs(xml)).distinct()
-            Log.d("R","  $cur → $kids")
-            for (k in kids) {
-                when {
-                    k.startsWith("host-") -> hosts.add(k)
-                    k.startsWith("datacenter-")||k.startsWith("folder-")||k.startsWith("group-") -> q.add(k)
-                }
-            }
-        }
-        return hosts
-    }
 
     override suspend fun getHostInfo(): HostInfo {
         if (!init()) return emptyHost("Unknown")
-        val hm = hostSystems.first()
+        // ESXi standalone = ha-host (confirmed from official app packet capture)
+        val hm = "ha-host"
         try {
             val px = callSoap(B.hostProps(pcMoid, hm), "HOST")
+            if (px.contains("ManagedObjectNotFound") || px.contains("has already been deleted") || px.length < 200) {
+                Log.e("R","ha-host not found, fallback")
+                return emptyHost("Unknown")
+            }
             val ver = callSoap(B.serviceContent(), "SC2").let { tag(it, "fullName") }.ifBlank { "Unknown" }
 
             val cpuMhz   = prop(px, "overallCpuUsage").filter(Char::isDigit).toLongOrNull() ?: 0L
@@ -131,7 +87,7 @@ class RemoteEsxiRepository(
         if (!init()) return emptyList()
         val vms = mutableListOf<VmInfo>()
         try {
-            val vx = callSoap(B.hostVms(pcMoid, hostSystems.first()), "VMLIST")
+            val vx = callSoap(B.hostVms(pcMoid, "ha-host"), "VMLIST")
             for (vid in moids(vx).filter { it.startsWith("vm-") }.take(30)) {
                 try {
                     val vp = callSoap(B.vmProps(pcMoid, vid), "VM$vid")
@@ -160,18 +116,6 @@ class RemoteEsxiRepository(
         fun serviceContent() = """<?xml version="1.0" encoding="UTF-8"?>
 <soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:vim="urn:vim25">
   <soapenv:Body><vim:RetrieveServiceContent><vim:_this type="ServiceInstance">ServiceInstance</vim:_this></vim:RetrieveServiceContent></soapenv:Body>
-</soapenv:Envelope>"""
-        fun folderChildren(pc: String, fid: String) = """<?xml version="1.0" encoding="UTF-8"?>
-<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:vim="urn:vim25">
-  <soapenv:Body><vim:RetrievePropertiesEx><vim:_this type="PropertyCollector">$pc</vim:_this><vim:specSet><vim:propSet><vim:type>Folder</vim:type><vim:pathSet>childEntity</vim:pathSet></vim:propSet><vim:objectSet><vim:obj type="Folder">$fid</vim:obj></vim:objectSet></vim:specSet><vim:options/></vim:RetrievePropertiesEx></soapenv:Body>
-</soapenv:Envelope>"""
-        fun findByDnsName(si: String, dns: String, vmSearch: Boolean) = """<?xml version="1.0" encoding="UTF-8"?>
-<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:vim="urn:vim25">
-  <soapenv:Body><vim:FindByDnsName><vim:_this type="SearchIndex">$si</vim:_this><vim:dnsName>$dns</vim:dnsName><vim:vmSearch>$vmSearch</vim:vmSearch></vim:FindByDnsName></soapenv:Body>
-</soapenv:Envelope>"""
-        fun findByIp(si: String, ip: String, vmSearch: Boolean) = """<?xml version="1.0" encoding="UTF-8"?>
-<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:vim="urn:vim25">
-  <soapenv:Body><vim:FindByIp><vim:_this type="SearchIndex">$si</vim:_this><vim:ip>$ip</vim:ip><vim:vmSearch>$vmSearch</vim:vmSearch></vim:FindByIp></soapenv:Body>
 </soapenv:Envelope>"""
         fun hostProps(pc: String, hm: String) = """<?xml version="1.0" encoding="UTF-8"?>
 <soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:vim="urn:vim25">
