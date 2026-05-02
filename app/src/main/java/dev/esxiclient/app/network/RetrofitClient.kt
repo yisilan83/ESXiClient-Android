@@ -31,9 +31,6 @@ object RetrofitClient {
         .followRedirects(true)
         .build()
 
-    /**
-     * Shared private helper for enqueuing an OkHttp request as a coroutine.
-     */
     private suspend fun executeRequest(request: Request): Response {
         return suspendCancellableCoroutine { continuation ->
             val call = client.newCall(request)
@@ -52,29 +49,40 @@ object RetrofitClient {
 
     val service: EsxiApiService = object : EsxiApiService {
 
-        // ── SOAP (unchanged) ────────────────────────────────────────────
+        // ── SOAP ─────────────────────────────────────────────────────
         override suspend fun executeSoap(
             url: String,
             soapXml: String,
             sessionId: String?,
             apiVersion: String
         ): Response {
-            val finalUrl = if (url.startsWith("https://")) "$url/sdk" else "https://$url/sdk"
+            // Use port 8443 — same as official ESXi Web UI
+            val finalUrl = if (url.startsWith("https://")) {
+                val base = url.trimEnd('/').removeSuffix("/sdk")
+                "$base:8443/sdk"
+            } else {
+                "https://$url:8443/sdk"
+            }
+
             val builder = Request.Builder()
                 .url(finalUrl)
                 .post(soapXml.toRequestBody("text/xml".toMediaType()))
                 .header("Content-Type", "text/xml; charset=utf-8")
                 .header("SOAPAction", "urn:vim25/$apiVersion")
+
+            // Cookie format: vmware_client=VMware; vmware_soap_session=HEX
+            // WARNING: do NOT quote the session id value!
             val cookieParts = mutableListOf<String>()
             cookieParts.add("vmware_client=VMware")
             if (!sessionId.isNullOrBlank()) {
-                cookieParts.add("vmware_soap_session=\"$sessionId\"")
+                cookieParts.add("vmware_soap_session=$sessionId")
             }
             builder.header("Cookie", cookieParts.joinToString("; "))
+
             return executeRequest(builder.build())
         }
 
-        // ── REST (new) ──────────────────────────────────────────────────
+        // ── REST ─────────────────────────────────────────────────────
         override suspend fun executeRest(
             url: String,
             path: String,
@@ -82,9 +90,8 @@ object RetrofitClient {
             password: String
         ): Response {
             val base = if (url.startsWith("https://")) url.trimEnd('/') else "https://$url"
-            // REST endpoints on ESXi are served on port 8443
             val finalUrl = "$base:8443$path"
-            val credential = okhttp3.Credentials.basic(username, password)
+            val credential = Credentials.basic(username, password)
             val request = Request.Builder()
                 .url(finalUrl)
                 .get()
