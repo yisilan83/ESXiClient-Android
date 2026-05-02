@@ -31,6 +31,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     val uiState: StateFlow<HomeUiState> = _uiState.asStateFlow()
 
     init {
+        Log.d("HomeVM", "HomeViewModel init, 开始加载数据")
         loadData()
     }
 
@@ -41,7 +42,10 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                 val host = sessionManager.hostFlow.firstOrNull()
                 val sessionId = sessionManager.sessionIdFlow.firstOrNull()
 
+                Log.d("HomeVM", "读取 session: host=$host, sessionId=${sessionId?.take(10)}...")
+
                 if (host.isNullOrBlank() || sessionId.isNullOrBlank()) {
+                    Log.w("HomeVM", "session 为空，跳转到未登录状态")
                     _uiState.value = _uiState.value.copy(
                         isLoading = false,
                         error = "尚未登录或会话已过期"
@@ -49,16 +53,18 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                     return@launch
                 }
 
+                Log.d("HomeVM", "开始 withContext(IO)...")
                 val result = withContext(Dispatchers.IO) {
                     val repo = RemoteEsxiRepository(host, sessionId)
-                    Log.d("HomeVM", "开始获取主机信息...")
+                    Log.d("HomeVM", "RemoteEsxiRepository 已创建，开始获取主机信息...")
                     val hostInfo = repo.getHostInfo()
-                    Log.d("HomeVM", "主机信息: $hostInfo")
+                    Log.d("HomeVM", "主机信息: cpu=${hostInfo.cpuUsagePercent}% mem=${hostInfo.memoryUsagePercent}% vm=${hostInfo.totalVmCount}")
                     Log.d("HomeVM", "开始获取 VM 列表...")
                     val vms = repo.getVmList()
                     Log.d("HomeVM", "VM 列表: ${vms.size} 个")
                     Pair(hostInfo, vms)
                 }
+                Log.d("HomeVM", "withContext 完成")
 
                 val hostInfo = result.first
                 val vms = result.second
@@ -74,11 +80,14 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                     hostInfo = updatedHostInfo,
                     vmList = vms
                 )
+                Log.d("HomeVM", "UI 状态已更新")
+            } catch (e: java.util.concurrent.CancellationException) {
+                throw e
             } catch (e: Exception) {
-                Log.e("HomeVM", "加载失败: ${e.message}", e)
+                Log.e("HomeVM", "加载失败: ${e.javaClass.simpleName} - ${e.message}", e)
                 _uiState.value = _uiState.value.copy(
                     isLoading = false,
-                    error = "网络请求失败: ${e.message}"
+                    error = "网络请求失败: ${e.javaClass.simpleName} - ${e.message}"
                 )
             }
         }
