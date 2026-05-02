@@ -20,7 +20,8 @@ data class LoginUiState(
     val savedHost: String = "",
     val savedUser: String = "",
     val savedPass: String = "",
-    val savedRememberMe: Boolean = false
+    val savedRememberMe: Boolean = false,      // ← current
+    val savedCheckHttp: Boolean = false        // ← new
 )
 
 class LoginViewModel(application: Application) : AndroidViewModel(application) {
@@ -32,20 +33,22 @@ class LoginViewModel(application: Application) : AndroidViewModel(application) {
 
     init {
         viewModelScope.launch {
-            val host = sessionManager.hostFlow.firstOrNull() ?: ""
-            val user = sessionManager.usernameFlow.firstOrNull() ?: "root"
-            val pass = sessionManager.passwordFlow.firstOrNull() ?: ""
-            val remember = sessionManager.rememberMeFlow.firstOrNull() ?: false
+            val host    = sessionManager.hostFlow.firstOrNull() ?: ""
+            val user    = sessionManager.usernameFlow.firstOrNull() ?: "root"
+            val pass    = sessionManager.passwordFlow.firstOrNull() ?: ""
+            val remember= sessionManager.rememberMeFlow.firstOrNull() ?: false
+            val http    = sessionManager.checkHttpFlow.firstOrNull() ?: false
             _uiState.value = _uiState.value.copy(
                 savedHost = host,
                 savedUser = user,
                 savedPass = if (remember) pass else "",
-                savedRememberMe = remember
+                savedRememberMe = remember,
+                savedCheckHttp = http
             )
         }
     }
 
-    fun login(host: String, user: String, pass: String, rememberMe: Boolean) {
+    fun login(host: String, user: String, pass: String, rememberMe: Boolean, checkHttp: Boolean) {
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(isLoading = true)
             try {
@@ -80,7 +83,7 @@ class LoginViewModel(application: Application) : AndroidViewModel(application) {
                 val responseText = result.second
 
                 if (responseText.isBlank() && httpCode >= 400) {
-                    _uiState.value = _uiState.value.copy(isLoading = false, error = "服务器无响应 (HTTP " + httpCode + ")，请检查地址")
+                    _uiState.value = _uiState.value.copy(isLoading = false, error = "服务器无响应 (HTTP $httpCode)，请检查地址")
                     return@launch
                 }
 
@@ -97,7 +100,7 @@ class LoginViewModel(application: Application) : AndroidViewModel(application) {
                 if ("<key>" in responseText) {
                     val sessionId = responseText.substringAfter("<key>").substringBefore("</key>")
                     if (sessionId.isNotBlank()) {
-                        sessionManager.saveSession(host, sessionId, user, pass, rememberMe)
+                        sessionManager.saveSession(host, sessionId, user, pass, rememberMe, checkHttp)
                         _uiState.value = _uiState.value.copy(isLoading = false, isSuccess = true)
                         return@launch
                     }
@@ -109,7 +112,7 @@ class LoginViewModel(application: Application) : AndroidViewModel(application) {
                     return@launch
                 }
 
-                _uiState.value = _uiState.value.copy(isLoading = false, error = "登录失败 (HTTP " + httpCode + ")，响应格式未知")
+                _uiState.value = _uiState.value.copy(isLoading = false, error = "登录失败 (HTTP $httpCode)，响应格式未知")
             } catch (e: java.net.UnknownHostException) {
                 _uiState.value = _uiState.value.copy(isLoading = false, error = "找不到主机，请检查 IP/域名")
             } catch (e: java.net.ConnectException) {
