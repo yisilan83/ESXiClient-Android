@@ -11,8 +11,8 @@ android {
         applicationId = "dev.esxiclient.app"
         minSdk = 26
         targetSdk = 34
-        versionCode = 19
-        versionName = "1.1.6"
+        versionCode = 20
+        versionName = "1.1.7"
     }
 
     buildFeatures {
