@@ -38,7 +38,6 @@ object RetrofitClient {
                 override fun onResponse(call: Call, response: Response) {
                     continuation.resume(response)
                 }
-
                 override fun onFailure(call: Call, e: IOException) {
                     continuation.resumeWithException(e)
                 }
@@ -47,22 +46,25 @@ object RetrofitClient {
         }
     }
 
+    /** Normalise user-supplied host string to a base URL. */
+    private fun toBaseUrl(host: String): String {
+        var h = host.trim().removeSuffix("/")
+        if (!h.startsWith("https://")) h = "https://$h"
+        // If user already specified a port, don't add 8443
+        return h
+    }
+
     val service: EsxiApiService = object : EsxiApiService {
 
-        // ── SOAP ─────────────────────────────────────────────────────
         override suspend fun executeSoap(
             url: String,
             soapXml: String,
             sessionId: String?,
             apiVersion: String
         ): Response {
-            // Use port 8443 — same as official ESXi Web UI
-            val finalUrl = if (url.startsWith("https://")) {
-                val base = url.trimEnd('/').removeSuffix("/sdk")
-                "$base:8443/sdk"
-            } else {
-                "https://$url:8443/sdk"
-            }
+            val base = toBaseUrl(url)
+            // Append /sdk only if not already present; do NOT add port.
+            val finalUrl = if (base.endsWith("/sdk")) base else "$base/sdk"
 
             val builder = Request.Builder()
                 .url(finalUrl)
@@ -70,10 +72,7 @@ object RetrofitClient {
                 .header("Content-Type", "text/xml; charset=utf-8")
                 .header("SOAPAction", "urn:vim25/$apiVersion")
 
-            // Cookie format: vmware_client=VMware; vmware_soap_session=HEX
-            // WARNING: do NOT quote the session id value!
-            val cookieParts = mutableListOf<String>()
-            cookieParts.add("vmware_client=VMware")
+            val cookieParts = mutableListOf("vmware_client=VMware")
             if (!sessionId.isNullOrBlank()) {
                 cookieParts.add("vmware_soap_session=$sessionId")
             }
@@ -82,15 +81,14 @@ object RetrofitClient {
             return executeRequest(builder.build())
         }
 
-        // ── REST ─────────────────────────────────────────────────────
         override suspend fun executeRest(
             url: String,
             path: String,
             username: String,
             password: String
         ): Response {
-            val base = if (url.startsWith("https://")) url.trimEnd('/') else "https://$url"
-            val finalUrl = "$base:8443$path"
+            val base = toBaseUrl(url)
+            val finalUrl = "$base$path"
             val credential = Credentials.basic(username, password)
             val request = Request.Builder()
                 .url(finalUrl)
