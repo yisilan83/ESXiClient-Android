@@ -28,14 +28,14 @@ class EsxiConnector(private val host: String) {
                     "REST"
                 )
             }
-            Log.w("CONN", "⚠ REST unavailable (port 8443 blocked or not supported)")
+            Log.w("CONN", "⚠ REST unavailable")
         } else {
             Log.w("CONN", "⚠ REST skipped: username/password not available")
         }
 
         // 2. Fall back to SOAP (priority 10)
         if (sessionId.isNotBlank()) {
-            Log.i("CONN", "⚠ REST unavailable, falling back to SOAP")
+            Log.i("CONN", "Falling back to SOAP")
             return ConnectionResult(
                 RemoteEsxiRepository(host, sessionId),
                 "SOAP"
@@ -51,13 +51,8 @@ class EsxiConnector(private val host: String) {
                 host, "/rest/vcenter/host", username, password
             )
             val ok = r.isSuccessful
-            // Also consume the body to avoid connection leak
             r.body?.close()
-            if (r.isSuccessful) {
-                Log.d("CONN", "REST probe: HTTP ${r.code} ✅")
-            } else {
-                Log.d("CONN", "REST probe: HTTP ${r.code} - body may contain error details")
-            }
+            Log.d("CONN", "REST probe: HTTP ${r.code} ${if (ok) "✅" else "❌"}")
             ok
         } catch (e: Exception) {
             Log.w("CONN", "REST probe failed: ${e.javaClass.simpleName}: ${e.message}")
