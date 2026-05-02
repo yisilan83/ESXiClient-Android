@@ -9,6 +9,9 @@ class RemoteEsxiRepository(
     private val sessionId: String
 ) : EsxiRepository {
 
+    override val priority: Int = 10
+    override val protocolName: String = "SOAP"
+
     private var apiVersion = "8.0"
 
     private suspend fun callSoap(soapXml: String, label: String = ""): String {
@@ -34,7 +37,7 @@ class RemoteEsxiRepository(
     }
 
     private fun rx1(tag: String, xml: String): String {
-        val m = Regex("""<$tag type="\w+">([^<]+)</$tag>""").find(xml)
+        val m = Regex("""<$tag type="\\w+">([^<]+)</$tag>""").find(xml)
             ?: Regex("""<$tag[^>]*>([^<]+)</$tag>""").find(xml)
         return m?.groupValues?.get(1) ?: ""
     }
@@ -50,10 +53,9 @@ class RemoteEsxiRepository(
 
             val ver = callSoap(B.serviceContent(), "SC2").let { tag(it, "fullName") }.ifBlank { "Unknown" }
 
-            // CPU: official app verified paths
             val cpuMhz   = prop(px, "overallCpuUsage").filter(Char::isDigit).toLongOrNull() ?: 0L
-            val cpuMhz_h  = prop(px, "cpuMhz").filter(Char::isDigit).toLongOrNull() // summary.hardware.cpuMhz
-            val cpuCores_h = prop(px, "numCpuCores").filter(Char::isDigit).toIntOrNull() // summary.hardware.numCpuCores
+            val cpuMhz_h  = prop(px, "cpuMhz").filter(Char::isDigit).toLongOrNull()
+            val cpuCores_h = prop(px, "numCpuCores").filter(Char::isDigit).toIntOrNull()
             val cpuHz    = prop(px, "hz").filter(Char::isDigit).toLongOrNull()
 
             val cpuUsage = when {
@@ -78,7 +80,6 @@ class RemoteEsxiRepository(
         if (!init()) return emptyList()
         val vms = mutableListOf<VmInfo>()
         try {
-            // ContainerView strategy (matches official app)
             val cvXml = callSoap(B.createContainerView(pcMoid), "CV")
             val cvMoid = rx1("obj", cvXml)
             Log.d("R","cvMoid=$cvMoid")
@@ -97,7 +98,6 @@ class RemoteEsxiRepository(
                 try { callSoap(B.destroyContainerView(pcMoid, cvMoid), "DCV") } catch (_: Exception) {}
             }
 
-            // Fallback: host.vm
             val hv = callSoap(B.hostVms(pcMoid, "ha-host"), "HOSTVM")
             val vmIds = moidList(hv, "VirtualMachine")
             Log.d("R","HOSTVM: ${vmIds.size} VMs")
