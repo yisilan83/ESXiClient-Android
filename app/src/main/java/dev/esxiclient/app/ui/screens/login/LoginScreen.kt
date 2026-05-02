@@ -26,16 +26,22 @@ fun LoginScreen(
 ) {
     val uiState by viewModel.uiState.collectAsState()
 
-    var host by remember { mutableStateOf("") }
-    var username by remember { mutableStateOf("root") }
-    var password by remember { mutableStateOf("") }
+    var host by remember { mutableStateOf(uiState.savedHost) }
+    var username by remember { mutableStateOf(uiState.savedUser.ifBlank { "root" }) }
+    var password by remember { mutableStateOf(uiState.savedPass) }
     var passwordVisible by remember { mutableStateOf(false) }
-    var rememberMe by remember { mutableStateOf(false) }
-    
-    // 用于处理表单校验的错误信息
+    var rememberMe by remember { mutableStateOf(uiState.savedRememberMe) }
+
+    // 当 ViewModel 加载完保存的凭据后，刷新本地状态
+    LaunchedEffect(uiState.savedHost, uiState.savedUser, uiState.savedPass, uiState.savedRememberMe) {
+        if (host.isBlank() && uiState.savedHost.isNotBlank()) host = uiState.savedHost
+        if (username == "root" && uiState.savedUser.isNotBlank()) username = uiState.savedUser
+        if (password.isBlank() && uiState.savedPass.isNotBlank()) password = uiState.savedPass
+        if (!rememberMe && uiState.savedRememberMe) rememberMe = true
+    }
+
     var localValidationError by remember { mutableStateOf<String?>(null) }
 
-    // 监听网络登录成功状态，成功时触发导航跳转
     LaunchedEffect(uiState.isSuccess) {
         if (uiState.isSuccess) {
             viewModel.resetState()
@@ -53,20 +59,20 @@ fun LoginScreen(
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             Spacer(modifier = Modifier.height(64.dp))
-            
+
             AppLogo(
                 modifier = Modifier.size(80.dp),
                 containerColor = MaterialTheme.colorScheme.primary,
                 holeColor = MaterialTheme.colorScheme.background
             )
-            
+
             Spacer(modifier = Modifier.height(24.dp))
             Text("ESXi Client", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
             Spacer(modifier = Modifier.height(8.dp))
             Text("连接到您的 VMware ESXi 主机", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            
+
             Spacer(modifier = Modifier.height(48.dp))
-            
+
             OutlinedTextField(
                 value = host,
                 onValueChange = { host = it; localValidationError = null },
@@ -79,7 +85,7 @@ fun LoginScreen(
                 enabled = !uiState.isLoading
             )
             Spacer(modifier = Modifier.height(12.dp))
-            
+
             OutlinedTextField(
                 value = username,
                 onValueChange = { username = it; localValidationError = null },
@@ -91,7 +97,7 @@ fun LoginScreen(
                 enabled = !uiState.isLoading
             )
             Spacer(modifier = Modifier.height(12.dp))
-            
+
             OutlinedTextField(
                 value = password,
                 onValueChange = { password = it; localValidationError = null },
@@ -108,9 +114,9 @@ fun LoginScreen(
                 shape = RoundedCornerShape(12.dp),
                 enabled = !uiState.isLoading
             )
-            
+
             Spacer(modifier = Modifier.height(8.dp))
-            
+
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically
@@ -122,9 +128,9 @@ fun LoginScreen(
                 )
                 Text(text = "记住密码", style = MaterialTheme.typography.bodyMedium)
             }
-            
+
             Spacer(modifier = Modifier.height(16.dp))
-            
+
             Button(
                 onClick = {
                     localValidationError = null
@@ -144,13 +150,12 @@ fun LoginScreen(
                     Text("登录", style = MaterialTheme.typography.labelLarge)
                 }
             }
-            
-            // 优先显示网络错误，其次是本地校验错误
+
             val displayError = uiState.error ?: localValidationError
-            displayError?.let { 
-                Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 8.dp)) 
+            displayError?.let {
+                Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 8.dp))
             }
-            
+
             Spacer(modifier = Modifier.height(24.dp))
             Text("首次连接时将自动接受服务器证书指纹", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
