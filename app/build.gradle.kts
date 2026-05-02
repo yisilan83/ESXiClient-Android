@@ -15,14 +15,9 @@ android {
         versionName = "1.0.11"
     }
 
-    buildTypes {
-        release {
-            isMinifyEnabled = false
-        }
-    }
-
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 
     composeOptions {
@@ -36,6 +31,12 @@ android {
 
     kotlinOptions {
         jvmTarget = "17"
+    }
+
+    buildTypes {
+        release {
+            isMinifyEnabled = false
+        }
     }
 }
 
