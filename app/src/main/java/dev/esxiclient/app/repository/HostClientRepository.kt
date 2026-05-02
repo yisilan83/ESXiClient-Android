@@ -3,12 +3,13 @@ package dev.esxiclient.app.repository
 import android.util.Log
 import dev.esxiclient.app.model.*
 import dev.esxiclient.app.network.RetrofitClient
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
-import java.net.HttpURLConnection
-import java.net.URL
-import javax.net.ssl.HttpsURLConnection
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import java.security.SecureRandom
+import java.security.cert.X509Certificate
 import javax.net.ssl.SSLContext
+import javax.net.ssl.TrustManager
+import javax.net.ssl.X509TrustManager
 
 /**
  * ESXi Host Client internal JSON API repository.
@@ -16,13 +17,8 @@ import javax.net.ssl.SSLContext
  * Uses the ESXi Host Client's own JSON endpoints (same as the
  * official ESXi Web UI at /ui/). These endpoints are served by
  * hostd and are NOT subject to the SOAP System.Read RBAC
- * restriction, because they use the same session cookie as the
- * Web UI itself.
- *
- * Endpoints (all relative to https://host/ui/):
- *   GET  /ui/host      → host summary + hardware
- *   GET  /ui/vms       → VM list with power state
- *   POST /ui/login     → session cookie (alternative to SOAP Login)
+ * restriction — they use the same session cookie mechanism as
+ * the official Web UI.
  */
 class HostClientRepository(
     private val host: String,
@@ -30,7 +26,7 @@ class HostClientRepository(
     private val password: String
 ) : EsxiRepository {
 
-    override val priority: Int = 30  // highest priority
+    override val priority: Int = 30   // higher than REST(20) and SOAP(10)
     override val protocolName: String = "HostUI"
 
     private val baseUrl: String
@@ -39,15 +35,28 @@ class HostClientRepository(
             return if (h.startsWith("https://")) h else "https://$h"
         }
 
-    // ── Cookie & CSRF ──────────────────────────────────────────────
+    // Shared OkHttp with trust-all SSL (same as RetrofitClient)
+    private val httpClient: OkHttpClient by lazy {
+        val trustAll = arrayOf<TrustManager>(object : X509TrustManager {
+            override fun checkClientTrusted(c: Array<out X509Certificate>?, a: String?) {}
+            override fun checkServerTrusted(c: Array<out X509Certificate>?, a: String?) {}
+            override fun getAcceptedIssuers(): Array<X509Certificate> = arrayOf()
+        })
+        val ssl = SSLContext.getInstance("SSL").apply { init(null, trustAll, SecureRandom()) }
+        OkHttpClient.Builder()
+            .sslSocketFactory(ssl.socketFactory, trustAll[0] as X509TrustManager)
+            .hostnameVerifier { _, _ -> true }
+            .followRedirects(true)
+            .build()
+    }
+
+    // ── Session & CSRF ─────────────────────────────────────────────
 
     private var sessionCookie: String? = null
-    private var csrfToken: String? = null
 
     private suspend fun ensureSession() {
         if (sessionCookie != null) return
 
-        // Login via SOAP (we know this works)
         val soapBody = """<?xml version="1.0" encoding="UTF-8"?>
 <soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:vim="urn:vim25">
   <soapenv:Body>
@@ -64,11 +73,10 @@ class HostClientRepository(
         val body = r.body?.string() ?: ""
         r.close()
 
-        // Extract session key from login response: <key>uuid</key>
         val key = Regex("""<key>([^<]+)</key>""").find(body)?.groupValues?.get(1) ?: ""
         if (key.isNotBlank()) {
             sessionCookie = "vmware_client=VMware; vmware_soap_session=$key"
-            Log.d("HOSTUI", "Got session: ${key.take(12)}...")
+            Log.d("HOSTUI", "Session OK: ${key.take(12)}...")
         } else {
             Log.e("HOSTUI", "Login failed: $body")
         }
@@ -79,25 +87,18 @@ class HostClientRepository(
         val url = "$baseUrl$path"
         Log.d("HOSTUI", "GET $url")
 
-        return withContext(Dispatchers.IO) {
-            val conn = URL(url).openConnection() as HttpsURLConnection
-            conn.requestMethod = "GET"
-            conn.setRequestProperty("Cookie", sessionCookie ?: "")
-            conn.setRequestProperty("Accept", "application/json")
-            conn.hostnameVerifier = org.apache.http.conn.ssl.NoopHostnameVerifier()
-            conn.connectTimeout = 10000
-            conn.readTimeout = 10000
+        val request = Request.Builder()
+            .url(url)
+            .get()
+            .header("Cookie", sessionCookie ?: "")
+            .header("Accept", "application/json, text/html")
+            .build()
 
-            try {
-                val code = conn.responseCode
-                val stream = if (code in 200..299) conn.inputStream else conn.errorStream
-                val text = stream?.bufferedReader()?.readText() ?: ""
-                Log.d("HOSTUI", "HTTP $code: ${text.take(300)}")
-                text
-            } finally {
-                conn.disconnect()
-            }
-        }
+        val resp = httpClient.newCall(request).execute()
+        val text = resp.body?.string() ?: ""
+        resp.close()
+        Log.d("HOSTUI", "HTTP ${resp.code}: ${text.take(400)}")
+        return text
     }
 
     // ── Host Info ──────────────────────────────────────────────────
@@ -107,28 +108,28 @@ class HostClientRepository(
             val json = fetchJson("/ui/host")
             if (json.isBlank()) return emptyHost()
 
-            // Parse simple JSON manually (avoid adding Gson/Moshi dependency)
-            val name    = jsonStr(json, "name") ?: jsonStr(json, "hostname") ?: host
-            val version = jsonStr(json, "fullName") ?: jsonStr(json, "version") ?: "Unknown"
-            val cpuPct  = jsonInt(json, "cpuUsage") ?: jsonInt(json, "overallCpuUsage") ?: 0
-            val memPct  = jsonInt(json, "memoryUsage") ?: jsonInt(json, "overallMemoryUsage") ?: 0
-            val memGB   = jsonLong(json, "totalMemoryGB") ?: jsonLong(json, "memorySize")?.div(1024*1024*1024) ?: 0L
+            // Parse JSON without a library
+            val name    = jsonStr(json, "name") ?: host
+            val version = jsonStr(json, "fullName") ?: "Unknown"
+            val cpuPct  = jsonInt(json, "cpuUsagePercent") ?: jsonInt(json, "cpuUsage") ?: 0
+            val memPct  = jsonInt(json, "memoryUsagePercent") ?: jsonInt(json, "memoryUsage") ?: 0
+            val memGB   = jsonLong(json, "totalMemoryGB") ?: jsonLong(json, "memorySize")?.div(1024 * 1024 * 1024) ?: 0L
             val uptime  = jsonLong(json, "uptimeSeconds") ?: jsonLong(json, "uptime") ?: 0L
 
-            Log.d("HOSTUI", "Host: $name v$version CPU=$cpuPct% MEM=$memPct% UP=${uptime}s")
+            Log.d("HOSTUI", "→ $name v$version CPU=$cpuPct% MEM=$memPct% UP=${uptime}s MEMGB=$memGB")
 
             return HostInfo(
                 hostname = name, hostAddress = host,
                 version = version,
                 cpuUsagePercent = cpuPct.coerceIn(0, 100),
                 memoryUsagePercent = memPct.coerceIn(0, 100),
-                totalMemoryGB = memGB.toInt(),
+                totalMemoryGB = memGB.coerceToInt(),
                 uptimeSeconds = uptime,
                 runningVmCount = 0, totalVmCount = 0,
                 storageUsedGB = 0L, storageTotalGB = 0L
             )
         } catch (e: Exception) {
-            Log.e("HOSTUI", "getHostInfo failed", e)
+            Log.e("HOSTUI", "getHostInfo error", e)
             return emptyHost()
         }
     }
@@ -140,17 +141,13 @@ class HostClientRepository(
             val json = fetchJson("/ui/vms")
             if (json.isBlank()) return emptyList()
 
-            // Try to parse JSON array of VMs
             val vms = mutableListOf<VmInfo>()
-            // Simple parser: find all VM objects in JSON
-            val vmPattern = Regex("""\{[^}]*"id"\s*:\s*"([^"]+)"[^}]*"name"\s*:\s*"([^"]+)"[^}]*"powerState"\s*:\s*"([^"]+)"[^}]*\}""")
-            vmPattern.findAll(json).forEach { match ->
-                val id    = match.groupValues[1]
-                val name  = match.groupValues[2]
-                val power = match.groupValues[3]
+            // Match VM objects: {"id":"N","name":"...","powerState":"..."}
+            val re = Regex(""""id"\s*:\s*"(\d+)","name"\s*:\s*"([^"]+)","powerState"\s*:\s*"([^"]+)""")
+            re.findAll(json).forEach { m ->
                 vms.add(VmInfo(
-                    id = id, name = name,
-                    powerState = when (power) {
+                    id = m.groupValues[1], name = m.groupValues[2],
+                    powerState = when (m.groupValues[3]) {
                         "poweredOn" -> PowerState.POWERED_ON
                         "suspended" -> PowerState.SUSPENDED
                         else -> PowerState.POWERED_OFF
@@ -160,11 +157,10 @@ class HostClientRepository(
                     guestOs = "", ipAddress = null
                 ))
             }
-
             Log.d("HOSTUI", "VMs: ${vms.size}")
             return vms
         } catch (e: Exception) {
-            Log.e("HOSTUI", "getVmList failed", e)
+            Log.e("HOSTUI", "getVmList error", e)
             return emptyList()
         }
     }
@@ -172,20 +168,21 @@ class HostClientRepository(
     override suspend fun getVmById(vmId: String) = getVmList().find { it.id == vmId }
     override suspend fun toggleVmPower(vmId: String) = false
 
-    // ── Simple JSON helpers (no external library) ──────────────────
+    // ── Mini JSON parser ───────────────────────────────────────────
 
-    private fun jsonStr(json: String, key: String): String? {
-        return Regex(""""$key"\s*:\s*"([^"]+)"""").find(json)?.groupValues?.get(1)
-    }
-    private fun jsonInt(json: String, key: String): Int? {
-        return Regex(""""$key"\s*:\s*(-?\d+)""").find(json)?.groupValues?.get(1)?.toIntOrNull()
-    }
-    private fun jsonLong(json: String, key: String): Long? {
-        return Regex(""""$key"\s*:\s*(-?\d+)""").find(json)?.groupValues?.get(1)?.toLongOrNull()
-    }
+    private fun jsonStr(json: String, key: String): String? =
+        Regex(""""$key"\s*:\s*"([^"]+)"""").find(json)?.groupValues?.get(1)
+
+    private fun jsonInt(json: String, key: String): Int? =
+        Regex(""""$key"\s*:\s*(-?\d+)""").find(json)?.groupValues?.get(1)?.toIntOrNull()
+
+    private fun jsonLong(json: String, key: String): Long? =
+        Regex(""""$key"\s*:\s*(-?\d+)""").find(json)?.groupValues?.get(1)?.toLongOrNull()
 
     private fun emptyHost() = HostInfo(host, host, version = "Unknown",
         cpuUsagePercent = 0, memoryUsagePercent = 0, totalMemoryGB = 0,
         uptimeSeconds = 0, runningVmCount = 0, totalVmCount = 0,
         storageUsedGB = 0, storageTotalGB = 0)
+
+    private fun Long.coerceToInt() = if (this > Int.MAX_VALUE) Int.MAX_VALUE else toInt()
 }
