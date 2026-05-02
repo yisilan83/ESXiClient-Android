@@ -63,6 +63,7 @@ class LoginViewModel(application: Application) : AndroidViewModel(application) {
       <vim:_this type="SessionManager">ha-sessionmgr</vim:_this>
       <vim:userName>${escapedUser}</vim:userName>
       <vim:password>${escapedPass}</vim:password>
+      <vim:locale>zh-CN</vim:locale>
     </vim:Login>
   </soapenv:Body>
 </soapenv:Envelope>"""
@@ -73,8 +74,8 @@ class LoginViewModel(application: Application) : AndroidViewModel(application) {
                     val responseText = bodyString ?: ""
                     response.close()
 
-                    Log.d("ESXiClient", "HTTP $httpCode from $host/sdk")
-                    Log.d("ESXiClient", "Response body: ${responseText.take(500)}")
+                    Log.d("LOGIN", "HTTP $httpCode from $host")
+                    Log.d("LOGIN", "Response: ${responseText.take(500)}")
 
                     Pair(httpCode, responseText)
                 }
@@ -97,10 +98,10 @@ class LoginViewModel(application: Application) : AndroidViewModel(application) {
                     return@launch
                 }
 
+                // <returnval><key>session-id-hex</key>...
                 if ("<key>" in responseText) {
                     val sessionId = responseText.substringAfter("<key>").substringBefore("</key>")
                     if (sessionId.isNotBlank()) {
-                        // Always save password so HomeViewModel can use it for REST Basic Auth
                         sessionManager.saveSession(host, sessionId, user, pass, rememberMe, checkHttp)
                         _uiState.value = _uiState.value.copy(isLoading = false, isSuccess = true)
                         return@launch
