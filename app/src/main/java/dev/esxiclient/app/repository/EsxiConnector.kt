@@ -4,8 +4,10 @@ import android.util.Log
 import dev.esxiclient.app.network.RetrofitClient
 
 /**
- * Protocol negotiator – tries REST first (ESXi 8.0 bypass),
- * falls back to SOAP (ESXi 6.x), then SSH (vim-cmd).
+ * Protocol negotiator – tries:
+ *   1. HostClient JSON API (priority 30) — /ui/host bypasses System.Read
+ *   2. REST API (priority 20) — /rest/vcenter/host
+ *   3. SOAP (priority 10) — /sdk (works on ESXi 6.x)
  */
 class EsxiConnector(private val host: String) {
 
@@ -19,8 +21,21 @@ class EsxiConnector(private val host: String) {
         password: String,
         sessionId: String
     ): ConnectionResult {
-        // 1. Try REST first (priority 20, bypasses ESXi 8.0 System.Read)
+        // 1. HostClient JSON API (uses same session, bypasses SOAP RBAC)
         if (username.isNotBlank() && password.isNotBlank()) {
+            Log.i("CONN", "→ Trying HostClient (/ui/host) …")
+            if (tryHostClient(username, password)) {
+                Log.i("CONN", "✅ Connected via HostClient")
+                return ConnectionResult(
+                    HostClientRepository(host, username, password),
+                    "HostUI"
+                )
+            }
+        }
+
+        // 2. REST API on port 443 (/rest/vcenter/host)
+        if (username.isNotBlank() && password.isNotBlank()) {
+            Log.i("CONN", "→ Trying REST (/rest/vcenter/host) …")
             if (tryRestApi(username, password)) {
                 Log.i("CONN", "✅ Connected via REST")
                 return ConnectionResult(
@@ -28,14 +43,11 @@ class EsxiConnector(private val host: String) {
                     "REST"
                 )
             }
-            Log.w("CONN", "⚠ REST unavailable")
-        } else {
-            Log.w("CONN", "⚠ REST skipped: username/password not available")
         }
 
-        // 2. Fall back to SOAP (priority 10)
+        // 3. SOAP fallback
         if (sessionId.isNotBlank()) {
-            Log.i("CONN", "Falling back to SOAP")
+            Log.i("CONN", "→ Falling back to SOAP …")
             return ConnectionResult(
                 RemoteEsxiRepository(host, sessionId),
                 "SOAP"
@@ -45,17 +57,27 @@ class EsxiConnector(private val host: String) {
         throw NoAvailableProtocolException(host)
     }
 
+    private suspend fun tryHostClient(username: String, password: String): Boolean {
+        return try {
+            // Just check if /ui/ is reachable
+            val repo = HostClientRepository(host, username, password)
+            val info = repo.getHostInfo()
+            info.hostname != "Unknown" && info.version != "Unknown"
+        } catch (e: Exception) {
+            Log.w("CONN", "HostClient probe: ${e.message}")
+            false
+        }
+    }
+
     private suspend fun tryRestApi(username: String, password: String): Boolean {
         return try {
-            val r = RetrofitClient.service.executeRest(
-                host, "/rest/vcenter/host", username, password
-            )
+            val r = RetrofitClient.service.executeRest(host, "/rest/vcenter/host", username, password)
             val ok = r.isSuccessful
             r.body?.close()
-            Log.d("CONN", "REST probe: HTTP ${r.code} ${if (ok) "✅" else "❌"}")
+            Log.d("CONN", "REST probe: HTTP ${r.code}")
             ok
         } catch (e: Exception) {
-            Log.w("CONN", "REST probe failed: ${e.javaClass.simpleName}: ${e.message}")
+            Log.w("CONN", "REST probe: ${e.message}")
             false
         }
     }
