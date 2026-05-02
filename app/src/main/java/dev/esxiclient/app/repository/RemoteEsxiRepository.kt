@@ -39,47 +39,38 @@ class RemoteEsxiRepository(
         return m?.groupValues?.get(1) ?: ""
     }
 
+    private fun moidList(xml: String, type: String) =
+        Regex("""<obj type="$type">(\w+-\d+)</obj>""").findAll(xml).map { it.groupValues[1] }.toList().distinct()
+
     override suspend fun getHostInfo(): HostInfo {
         if (!init()) return emptyHost("Unknown")
         try {
-            // 使用官方 App 确认过的属性路径
             val px = callSoap(B.hostProps(pcMoid, "ha-host"), "HOST")
             if (px.contains("ManagedObjectNotFound")) return emptyHost("Unknown")
 
-            // 从 ServiceContent 里拿版本号，避免额外请求
             val ver = callSoap(B.serviceContent(), "SC2").let { tag(it, "fullName") }.ifBlank { "Unknown" }
 
-            if (px.contains("soapenv:Fault")) {
-                Log.e("R","HOST SOAP Fault, partial parse...")
-            }
-
-            // CPU: official app uses summary.hardware.cpuMhz & summary.hardware.numCpuCores
+            // CPU: official app verified paths
             val cpuMhz   = prop(px, "overallCpuUsage").filter(Char::isDigit).toLongOrNull() ?: 0L
-            val cpuCores = prop(px, "numCpuCores").filter(Char::isDigit).toIntOrNull() ?: 1
+            val cpuMhz_h  = prop(px, "cpuMhz").filter(Char::isDigit).toLongOrNull() // summary.hardware.cpuMhz
+            val cpuCores_h = prop(px, "numCpuCores").filter(Char::isDigit).toIntOrNull() // summary.hardware.numCpuCores
             val cpuHz    = prop(px, "hz").filter(Char::isDigit).toLongOrNull()
-            val cpuMhz_h  = prop(px, "cpuMhz").filter(Char::isDigit).toLongOrNull() // official: summary.hardware.cpuMhz
-            val cpuCores_h = prop(px, "numCpuCores").filter(Char::isDigit).toIntOrNull()
 
-            // 计算 CPU 使用率
             val cpuUsage = when {
                 cpuMhz_h != null && cpuCores_h != null && cpuMhz_h > 0L && cpuCores_h > 0 -> ((cpuMhz * 100L) / (cpuMhz_h * cpuCores_h)).toInt()
                 cpuHz != null && cpuHz > 0 && cpuCores_h != null && cpuCores_h > 0 -> ((cpuMhz * 1_000_000L * 100L) / (cpuHz * cpuCores_h)).toInt()
-                cpuCores > 0 && cpuHz != null && cpuHz > 0 -> ((cpuMhz * 100L) / ((cpuCores * cpuHz) / 1_000_000L)).toInt()
                 else -> 0
             }.coerceIn(0, 100)
 
-            // Memory: official app uses hardware.memorySize (bytes)
             val memMbRaw = prop(px, "overallMemoryUsage").filter(Char::isDigit).toLongOrNull() ?: 0L
             val memBytes = prop(px, "memorySize").filter(Char::isDigit).toLongOrNull() ?: 0L
             val totalMemGb = memBytes / (1024*1024*1024)
             val memUsage = if (totalMemGb > 0) ((memMbRaw * 100L) / (totalMemGb * 1024)).toInt().coerceIn(0, 100) else 0
 
             val uptime = prop(px, "uptime").filter(Char::isDigit).toLongOrNull() ?: 0L
-            // 不查 totalVmCount (ESXi 8.0 可能不支持)，从 VM 列表计算
-            val totalVmCount = 0 // 由 HomeViewModel 从实际 VM 列表计算
 
-            Log.d("R","CPU=$cpuUsage% MEM=$memUsage% MEMGB=$totalMemGb UP=${uptime}s cpuMhz=$cpuMhz memMbRaw=$memMbRaw cores=$cpuCores_h/$cpuCores hz=$cpuHz memBytes=$memBytes")
-            return buildHost(ver, cpuUsage, memUsage, totalMemGb, uptime, totalVmCount, 0L, 0L)
+            Log.d("R","CPU=$cpuUsage% MEM=$memUsage% MEMGB=$totalMemGb UP=${uptime}s cpuMhz=$cpuMhz cpuMhz_h=$cpuMhz_h cores=$cpuCores_h hz=$cpuHz memBytes=$memBytes")
+            return buildHost(ver, cpuUsage, memUsage, totalMemGb, uptime, 0, 0L, 0L)
         } catch (e: Exception) { Log.e("R","ghi err ${e.message}",e); return emptyHost("Unknown") }
     }
 
@@ -87,41 +78,31 @@ class RemoteEsxiRepository(
         if (!init()) return emptyList()
         val vms = mutableListOf<VmInfo>()
         try {
-            // 直接用 ContainerView 遍历所有 VM（模仿官方 App）
+            // ContainerView strategy (matches official app)
             val cvXml = callSoap(B.createContainerView(pcMoid), "CV")
-            val cvMoid = rx1("obj", cvXml).ifBlank {
-                // 回退：从 host vm 属性拿
-                Log.d("R","CV failed, fallback to host.vm")
-                ""
-            }
+            val cvMoid = rx1("obj", cvXml)
             Log.d("R","cvMoid=$cvMoid")
 
-            // 如果有 ContainerView，用它遍历所有 VM
             if (cvMoid.isNotBlank()) {
                 val vx = callSoap(B.vmViaContainerView(pcMoid, cvMoid), "VMVIA")
-                val vmIds = Regex("""<obj type="VirtualMachine">(\w+-\d+)</obj>""").findAll(vx).map { it.groupValues[1] }.distinct()
+                val vmIds = moidList(vx, "VirtualMachine")
                 Log.d("R","VMVIA: ${vmIds.size} VMs: $vmIds")
-                for (vid in vmIds.take(30)) {
-                    try {
-                        val vp = callSoap(B.vmProps(pcMoid, vid), "VM$vid")
-                        vms.add(parseVm(vid, vp))
-                    } catch (_: Exception) {}
-                }
-                if (vms.isNotEmpty()) {
+                if (vmIds.isNotEmpty()) {
+                    for (vid in vmIds.take(30)) {
+                        try { vms.add(parseVm(vid, callSoap(B.vmProps(pcMoid, vid), "VM$vid"))) } catch (_: Exception) {}
+                    }
                     try { callSoap(B.destroyContainerView(pcMoid, cvMoid), "DCV") } catch (_: Exception) {}
                     return vms
                 }
+                try { callSoap(B.destroyContainerView(pcMoid, cvMoid), "DCV") } catch (_: Exception) {}
             }
 
-            // 回退：直接用 host.vm（可能被权限拒绝）
+            // Fallback: host.vm
             val hv = callSoap(B.hostVms(pcMoid, "ha-host"), "HOSTVM")
-            val vmIds = Regex("""<obj type="VirtualMachine">(\w+-\d+)</obj>""").findAll(hv).map { it.groupValues[1] }.distinct()
-            Log.d("R","HOSTVM raw: ${vmIds.size} VMs")
+            val vmIds = moidList(hv, "VirtualMachine")
+            Log.d("R","HOSTVM: ${vmIds.size} VMs")
             for (vid in vmIds.take(30)) {
-                try {
-                    val vp = callSoap(B.vmProps(pcMoid, vid), "VM$vid")
-                    vms.add(parseVm(vid, vp))
-                } catch (_: Exception) {}
+                try { vms.add(parseVm(vid, callSoap(B.vmProps(pcMoid, vid), "VM$vid"))) } catch (_: Exception) {}
             }
         } catch (e: Exception) { Log.e("R","gvl err ${e.message}",e) }
         return vms
@@ -149,17 +130,14 @@ class RemoteEsxiRepository(
 <soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:vim="urn:vim25">
   <soapenv:Body><vim:RetrieveServiceContent><vim:_this type="ServiceInstance">ServiceInstance</vim:_this></vim:RetrieveServiceContent></soapenv:Body>
 </soapenv:Envelope>"""
-        // 使用官方 App 确认过有效的属性路径
         fun hostProps(pc: String, hm: String) = """<?xml version="1.0" encoding="UTF-8"?>
 <soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:vim="urn:vim25">
   <soapenv:Body><vim:RetrievePropertiesEx><vim:_this type="PropertyCollector">$pc</vim:_this><vim:specSet><vim:propSet><vim:type>HostSystem</vim:type><vim:pathSet>summary.quickStats.overallCpuUsage</vim:pathSet><vim:pathSet>summary.quickStats.overallMemoryUsage</vim:pathSet><vim:pathSet>summary.quickStats.uptime</vim:pathSet><vim:pathSet>summary.hardware.cpuMhz</vim:pathSet><vim:pathSet>summary.hardware.numCpuCores</vim:pathSet><vim:pathSet>hardware.cpuInfo.numCpuCores</vim:pathSet><vim:pathSet>hardware.cpuInfo.hz</vim:pathSet><vim:pathSet>hardware.memorySize</vim:pathSet></vim:propSet><vim:objectSet><vim:obj type="HostSystem">$hm</vim:obj></vim:objectSet></vim:specSet><vim:options/></vim:RetrievePropertiesEx></soapenv:Body>
 </soapenv:Envelope>"""
-        // CreateContainerView
         fun createContainerView(pc: String) = """<?xml version="1.0" encoding="UTF-8"?>
 <soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:vim="urn:vim25">
   <soapenv:Body><vim:CreateContainerView><vim:_this type="ViewManager">ViewManager</vim:_this><vim:container type="Folder">ha-folder-root</vim:container><vim:type>VirtualMachine</vim:type><vim:recursive>true</vim:recursive></vim:CreateContainerView></soapenv:Body>
 </soapenv:Envelope>"""
-        // 通过 ContainerView 遍历 VM
         fun vmViaContainerView(pc: String, cv: String) = """<?xml version="1.0" encoding="UTF-8"?>
 <soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:vim="urn:vim25" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
   <soapenv:Body><vim:RetrievePropertiesEx><vim:_this type="PropertyCollector">$pc</vim:_this><vim:specSet><vim:propSet><vim:type>VirtualMachine</vim:type><vim:pathSet>name</vim:pathSet><vim:pathSet>runtime.powerState</vim:pathSet><vim:pathSet>config.hardware.numCPU</vim:pathSet><vim:pathSet>config.hardware.memoryMB</vim:pathSet><vim:pathSet>config.guestFullName</vim:pathSet><vim:pathSet>guest.ipAddress</vim:pathSet><vim:pathSet>summary.quickStats.overallCpuUsage</vim:pathSet><vim:pathSet>summary.quickStats.guestMemoryUsage</vim:pathSet></vim:propSet><vim:objectSet><vim:obj type="ContainerView">$cv</vim:obj><vim:skip>false</vim:skip><vim:selectSet xsi:type="TraversalSpec"><vim:type>ContainerView</vim:type><vim:path>view</vim:path><vim:skip>false</vim:skip></vim:selectSet></vim:objectSet></vim:specSet><vim:options/></vim:RetrievePropertiesEx></soapenv:Body>
