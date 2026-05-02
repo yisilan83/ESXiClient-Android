@@ -35,31 +35,27 @@ object RetrofitClient {
         .build()
 
     val service: EsxiApiService = object : EsxiApiService {
-        override suspend fun executeSoap(url: String, soapXml: String, sessionId: String?): okhttp3.Response {
+        override suspend fun executeSoap(url: String, soapXml: String, sessionId: String?, apiVersion: String): okhttp3.Response {
             val finalUrl = if (url.startsWith("https://")) "$url/sdk" else "https://$url/sdk"
             val builder = Request.Builder()
                 .url(finalUrl)
                 .post(soapXml.toRequestBody("text/xml".toMediaType()))
                 .header("Content-Type", "text/xml; charset=utf-8")
-                .header("SOAPAction", "\"urn:vim25/8.0\"")
+                .header("SOAPAction", "urn:vim25/$apiVersion")
+            val cookieParts = mutableListOf<String>()
+            cookieParts.add("vmware_client=VMware")
             if (!sessionId.isNullOrBlank()) {
-                builder.header("Cookie", "vmware_soap_session=$sessionId")
+                cookieParts.add("vmware_soap_session=\"$sessionId\"")
             }
+            builder.header("Cookie", cookieParts.joinToString("; "))
             val request = builder.build()
-
             return suspendCancellableCoroutine { continuation ->
                 val call = client.newCall(request)
                 call.enqueue(object : Callback {
-                    override fun onResponse(call: Call, response: okhttp3.Response) {
-                        continuation.resume(response)
-                    }
-                    override fun onFailure(call: Call, e: IOException) {
-                        continuation.resumeWithException(e)
-                    }
+                    override fun onResponse(call: Call, response: okhttp3.Response) { continuation.resume(response) }
+                    override fun onFailure(call: Call, e: IOException) { continuation.resumeWithException(e) }
                 })
-                continuation.invokeOnCancellation {
-                    call.cancel()
-                }
+                continuation.invokeOnCancellation { call.cancel() }
             }
         }
     }
