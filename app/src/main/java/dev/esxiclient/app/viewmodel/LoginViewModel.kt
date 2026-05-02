@@ -9,13 +9,18 @@ import dev.esxiclient.app.network.RetrofitClient
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 data class LoginUiState(
     val isLoading: Boolean = false,
     val error: String? = null,
-    val isSuccess: Boolean = false
+    val isSuccess: Boolean = false,
+    val savedHost: String = "",
+    val savedUser: String = "",
+    val savedPass: String = "",
+    val savedRememberMe: Boolean = false
 )
 
 class LoginViewModel(application: Application) : AndroidViewModel(application) {
@@ -25,9 +30,25 @@ class LoginViewModel(application: Application) : AndroidViewModel(application) {
 
     private val sessionManager = SessionManager(application)
 
+    init {
+        // 恢复保存的登录信息
+        viewModelScope.launch {
+            val host = sessionManager.hostFlow.firstOrNull() ?: ""
+            val user = sessionManager.usernameFlow.firstOrNull() ?: "root"
+            val pass = sessionManager.passwordFlow.firstOrNull() ?: ""
+            val remember = sessionManager.rememberMeFlow.firstOrNull() ?: false
+            _uiState.value = _uiState.value.copy(
+                savedHost = host,
+                savedUser = user,
+                savedPass = if (remember) pass else "",
+                savedRememberMe = remember
+            )
+        }
+    }
+
     fun login(host: String, user: String, pass: String, rememberMe: Boolean) {
         viewModelScope.launch {
-            _uiState.value = LoginUiState(isLoading = true)
+            _uiState.value = _uiState.value.copy(isLoading = true)
             try {
                 val result = withContext(Dispatchers.IO) {
                     val escapedUser = user.replace("&", "&amp;").replace("<", "&lt;")
@@ -60,49 +81,49 @@ class LoginViewModel(application: Application) : AndroidViewModel(application) {
                 val responseText = result.second
 
                 if (responseText.isBlank() && httpCode >= 400) {
-                    _uiState.value = LoginUiState(error = "服务器无响应 (HTTP " + httpCode + ")，请检查地址")
+                    _uiState.value = _uiState.value.copy(isLoading = false, error = "服务器无响应 (HTTP " + httpCode + ")，请检查地址")
                     return@launch
                 }
 
                 if (httpCode == 404) {
-                    _uiState.value = LoginUiState(error = "SOAP 端点不存在 (404)，请检查 ESXi 版本")
+                    _uiState.value = _uiState.value.copy(isLoading = false, error = "SOAP 端点不存在 (404)，请检查 ESXi 版本")
                     return@launch
                 }
 
                 if (httpCode == 500 && ("InvalidLogin" in responseText || "NoPermission" in responseText)) {
-                    _uiState.value = LoginUiState(error = "用户名或密码错误")
+                    _uiState.value = _uiState.value.copy(isLoading = false, error = "用户名或密码错误")
                     return@launch
                 }
 
                 if ("<key>" in responseText) {
                     val sessionId = responseText.substringAfter("<key>").substringBefore("</key>")
                     if (sessionId.isNotBlank()) {
-                        sessionManager.saveSession(host, sessionId, user)
-                        _uiState.value = LoginUiState(isSuccess = true)
+                        sessionManager.saveSession(host, sessionId, user, pass, rememberMe)
+                        _uiState.value = _uiState.value.copy(isLoading = false, isSuccess = true)
                         return@launch
                     }
                 }
 
                 if ("soapenv:Fault" in responseText) {
                     val faultMsg = responseText.substringAfter("<faultstring>").substringBefore("</faultstring>")
-                    _uiState.value = LoginUiState(error = faultMsg.ifBlank { "SOAP 错误" })
+                    _uiState.value = _uiState.value.copy(isLoading = false, error = faultMsg.ifBlank { "SOAP 错误" })
                     return@launch
                 }
 
-                _uiState.value = LoginUiState(error = "登录失败 (HTTP " + httpCode + ")，响应格式未知")
+                _uiState.value = _uiState.value.copy(isLoading = false, error = "登录失败 (HTTP " + httpCode + ")，响应格式未知")
             } catch (e: java.net.UnknownHostException) {
-                _uiState.value = LoginUiState(error = "找不到主机，请检查 IP/域名")
+                _uiState.value = _uiState.value.copy(isLoading = false, error = "找不到主机，请检查 IP/域名")
             } catch (e: java.net.ConnectException) {
-                _uiState.value = LoginUiState(error = "连接被拒绝，请确保与 ESXi 同一网络")
+                _uiState.value = _uiState.value.copy(isLoading = false, error = "连接被拒绝，请确保与 ESXi 同一网络")
             } catch (e: javax.net.ssl.SSLHandshakeException) {
-                _uiState.value = LoginUiState(error = "SSL 握手失败: " + (e.message?.take(60) ?: ""))
+                _uiState.value = _uiState.value.copy(isLoading = false, error = "SSL 握手失败: " + (e.message?.take(60) ?: ""))
             } catch (e: Exception) {
-                _uiState.value = LoginUiState(error = "网络异常: " + e.javaClass.simpleName + " - " + e.message)
+                _uiState.value = _uiState.value.copy(isLoading = false, error = "网络异常: " + e.javaClass.simpleName + " - " + e.message)
             }
         }
     }
 
     fun resetState() {
-        _uiState.value = LoginUiState()
+        _uiState.value = _uiState.value.copy(isSuccess = false)
     }
 }
