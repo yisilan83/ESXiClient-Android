@@ -6,6 +6,6 @@ interface EsxiApiService {
     suspend fun executeSoap(
         url: String,
         soapXml: String,
-        sessionId: String? = null
+        sessionId: String?
     ): Response
 }
