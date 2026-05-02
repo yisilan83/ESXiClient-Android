@@ -89,6 +89,27 @@ fun HomeScreen(
                 },
                 navigationIcon = { IconButton(onClick = { showLogoutDialog = true }) { Icon(Icons.Default.Logout, null) } },
                 actions = {
+                    // Protocol badge
+                    if (uiState.protocol.isNotEmpty()) {
+                        Surface(
+                            color = if (uiState.protocol == "REST")
+                                MaterialTheme.colorScheme.primaryContainer
+                            else
+                                MaterialTheme.colorScheme.secondaryContainer,
+                            shape = MaterialTheme.shapes.small
+                        ) {
+                            Text(
+                                text = uiState.protocol,
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = if (uiState.protocol == "REST")
+                                    MaterialTheme.colorScheme.onPrimaryContainer
+                                else
+                                    MaterialTheme.colorScheme.onSecondaryContainer
+                            )
+                        }
+                        Spacer(Modifier.width(4.dp))
+                    }
                     IconButton(onClick = { viewModel.loadData() }) { Icon(Icons.Default.Refresh, null) }
                     IconButton(onClick = onSettingsClick) { Icon(Icons.Default.Settings, null) }
                 },
