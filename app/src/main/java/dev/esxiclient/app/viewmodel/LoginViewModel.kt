@@ -31,7 +31,6 @@ class LoginViewModel(application: Application) : AndroidViewModel(application) {
     private val sessionManager = SessionManager(application)
 
     init {
-        // 恢复保存的登录信息
         viewModelScope.launch {
             val host = sessionManager.hostFlow.firstOrNull() ?: ""
             val user = sessionManager.usernameFlow.firstOrNull() ?: "root"
@@ -65,7 +64,7 @@ class LoginViewModel(application: Application) : AndroidViewModel(application) {
   </soapenv:Body>
 </soapenv:Envelope>"""
 
-                    val response = RetrofitClient.service.executeSoap(host, soapBody)
+                    val response = RetrofitClient.service.executeSoap(host, soapBody, null)
                     val httpCode = response.code
                     val bodyString = response.body?.string()
                     val responseText = bodyString ?: ""
