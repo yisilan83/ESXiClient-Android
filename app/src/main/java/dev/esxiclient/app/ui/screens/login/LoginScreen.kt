@@ -50,7 +50,7 @@ fun LoginScreen(onLoginSuccess: () -> Unit, viewModel: LoginViewModel = viewMode
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             Spacer(Modifier.height(60.dp))
-            AppLogo()
+            AppLogo(modifier = Modifier.size(80.dp))
             Spacer(Modifier.height(24.dp))
             Text("ESXi 客户端", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
             Text("Material You 设计风格", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
