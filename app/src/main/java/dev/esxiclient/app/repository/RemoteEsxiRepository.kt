@@ -37,7 +37,8 @@ class RemoteEsxiRepository(
     }
 
     private fun rx1(tag: String, xml: String): String {
-        val m = Regex("""<$tag type="\\w+">([^<]+)</$tag>""").find(xml)
+        // Try: <tag type="xxxx">value</tag>
+        val m = Regex("""<$tag type="\w+">([^<]+)</$tag>""").find(xml)
             ?: Regex("""<$tag[^>]*>([^<]+)</$tag>""").find(xml)
         return m?.groupValues?.get(1) ?: ""
     }
